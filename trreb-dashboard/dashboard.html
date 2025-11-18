@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRREB Sync Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        h1 { color: #2d3748; font-size: 32px; margin-bottom: 10px; }
+        h2 { color: #2d3748; font-size: 20px; margin-bottom: 20px; font-weight: 600; }
+        
+        .subtitle { color: #718096; font-size: 16px; }
+        .last-updated { margin-top: 15px; color: #a0aec0; font-size: 14px; }
+        
+        .grid { display: grid; gap: 15px; margin-bottom: 20px; }
+        .grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+        
+        .stat-box {
+            background: #f7fafc;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .label {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #718096;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .value {
+            font-size: 24px;
+            color: #2d3748;
+            font-weight: 700;
+        }
+        
+        .value-sm {
+            font-size: 14px;
+            color: #718096;
+            margin-top: 5px;
+        }
+        
+        .dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .dot-green { background: #48bb78; animation: pulse 2s infinite; }
+        .dot-gray { background: #a0aec0; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .sync-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .sync-row:last-child { border-bottom: none; }
+        
+        .sync-name { font-size: 16px; font-weight: 600; color: #2d3748; }
+        
+        .sync-state {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+            color: #718096;
+        }
+        
+        .sync-state.active { color: #48bb78; font-weight: 600; }
+        
+        .progress-bar-container {
+            width: 100%;
+            height: 20px;
+            background: #e2e8f0;
+            border-radius: 10px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .btn-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .btn {
+            padding: 15px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary { background: #667eea; color: white; }
+        .btn-success { background: #48bb78; color: white; }
+        .btn-secondary { background: #e2e8f0; color: #2d3748; }
+        .btn-danger { background: #f56565; color: white; }
+        
+        .btn:hover { transform: translateY(-2px); opacity: 0.9; }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        thead { background: #f7fafc; }
+        
+        th {
+            padding: 12px;
+            text-align: left;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #718096;
+            font-weight: 600;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 14px;
+            color: #2d3748;
+        }
+        
+        tr:hover { background: #f7fafc; }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .badge-success { background: #c6f6d5; color: #22543d; }
+        .badge-info { background: #bee3f8; color: #2c5282; }
+        .badge-danger { background: #fed7d7; color: #742a2a; }
+        .badge-gray { background: #e2e8f0; color: #4a5568; }
+        
+        .coverage-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        
+        .coverage-card {
+            background: #f7fafc;
+            padding: 25px;
+            border-radius: 8px;
+        }
+        
+        .coverage-card h3 {
+            color: #2d3748;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .coverage-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .coverage-stat:last-child { border-bottom: none; }
+        
+        .stat-label { color: #718096; font-size: 14px; }
+        .stat-value { color: #2d3748; font-weight: 600; font-size: 14px; }
+        
+        @media (max-width: 768px) {
+            .grid-4, .btn-grid, .coverage-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🏠 TRREB Data Sync Dashboard</h1>
+            <p class="subtitle">Monitor and control your real estate data synchronization</p>
+            <div class="last-updated">Last updated: <span id="lastUpdate">--</span></div>
+        </div>
+
+        <div class="card">
+            <h2>📊 Real-Time Sync Status</h2>
+            <div class="grid grid-4">
+                <div class="stat-box">
+                    <div class="label">Current State</div>
+                    <div class="value" id="overallState">
+                        <span class="dot dot-gray" id="overallDot"></span>
+                        <span id="overallText">Idle</span>
+                    </div>
+                </div>
+                
+                <div class="stat-box">
+                    <div class="label">Sync Status</div>
+                    <div class="sync-row">
+                        <span class="sync-name">IDX</span>
+                        <span class="sync-state" id="idxState">
+                            <span class="dot dot-gray" id="idxDot"></span>
+                            <span id="idxText">Idle</span>
+                        </span>
+                    </div>
+                    <div class="sync-row">
+                        <span class="sync-name">VOW</span>
+                        <span class="sync-state" id="vowState">
+                            <span class="dot dot-gray" id="vowDot"></span>
+                            <span id="vowText">Idle</span>
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="stat-box">
+                    <div class="label">Progress</div>
+                    <div class="value" id="progress">0 / 0</div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" id="progressBar" style="width: 0%">0%</div>
+                    </div>
+                </div>
+                
+                <div class="stat-box">
+                    <div class="label">Syncing Date</div>
+                    <div class="value" id="syncDate" style="font-size: 16px;">--</div>
+                    <div class="value-sm" id="syncKey">--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>🎮 Sync Controls</h2>
+            <div class="btn-grid">
+                <button class="btn btn-success" onclick="triggerSync('ALL')">🔄 Sync All</button>
+                <button class="btn btn-primary" onclick="triggerSync('IDX')">▶️ Start IDX</button>
+                <button class="btn btn-primary" onclick="triggerSync('VOW')">▶️ Start VOW</button>
+                <button class="btn btn-secondary" onclick="pauseSync()">⏸️ Pause</button>
+                <button class="btn btn-danger" onclick="resetSync()">🔄 Reset</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📜 Sync History</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Records</th>
+                        <th>Started</th>
+                        <th>Completed</th>
+                        <th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody">
+                    <tr>
+                        <td colspan="6" style="text-align: center; color: #a0aec0; padding: 30px;">
+                            No sync history available
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>📈 Data Coverage</h2>
+            <div class="coverage-grid">
+                <div class="coverage-card">
+                    <h3>🏘️ Properties</h3>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Total Records</span>
+                        <span class="stat-value" id="totalProps">--</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-label">IDX (Available)</span>
+                        <span class="stat-value" id="idxProps">--</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-label">VOW (Unavailable)</span>
+                        <span class="stat-value" id="vowProps">--</span>
+                    </div>
+                </div>
+
+                <div class="coverage-card">
+                    <h3>📸 Media</h3>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Total Images</span>
+                        <span class="stat-value" id="totalMedia">--</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Properties with Media</span>
+                        <span class="stat-value" id="mediaProps">--</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Coverage</span>
+                        <span class="stat-value" id="mediaCoverage">--%</span>
+                    </div>
+                </div>
+
+                <div class="coverage-card">
+                    <h3>🛏️ Rooms</h3>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Total Rooms</span>
+                        <span class="stat-value" id="totalRooms">--</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Properties with Rooms</span>
+                        <span class="stat-value" id="roomProps">--</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Coverage</span>
+                        <span class="stat-value" id="roomsCoverage">--%</span>
+                    </div>
+                </div>
+
+                <div class="coverage-card">
+                    <h3>🏡 Open Houses</h3>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Total Events</span>
+                        <span class="stat-value" id="totalOpenHouse">--</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Properties with Events</span>
+                        <span class="stat-value" id="openHouseProps">--</span>
+                    </div>
+                    <div class="coverage-stat">
+                        <span class="stat-label">Coverage</span>
+                        <span class="stat-value" id="openHouseCoverage">--%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://gyeviskmqtkskcoyyprp.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5ZXZpc2ttcXRrc2tjb3l5cHJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgzMjM5MzgsImV4cCI6MjA3Mzg5OTkzOH0.qDOpA1nSwWdnQhIJQiQx-rjgl800EjTU3M90iKQQDiI';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        refreshData();
+        setInterval(refreshData, 30000);
+
+        async function refreshData() {
+            try {
+                await Promise.all([
+                    updateSyncStatus(),
+                    updateCoverageStats(),
+                    updateSyncHistory()
+                ]);
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleString();
+            } catch (error) {
+                console.error('Error refreshing:', error);
+            }
+        }
+
+        async function updateSyncStatus() {
+            const { data } = await supabase.from('SyncState').select('*');
+            if (!data || data.length === 0) return;
+
+            const idx = data.find(s => s.SyncType === 'IDX');
+            const vow = data.find(s => s.SyncType === 'VOW');
+            
+            let activeSync = null;
+            let anyRunning = false;
+
+            if (idx) {
+                const isRunning = isRecentlyRunning(idx);
+                updateSyncDisplay('idx', isRunning);
+                if (isRunning) {
+                    activeSync = idx;
+                    anyRunning = true;
+                }
+            }
+
+            if (vow) {
+                const isRunning = isRecentlyRunning(vow);
+                updateSyncDisplay('vow', isRunning);
+                if (isRunning) {
+                    activeSync = vow;
+                    anyRunning = true;
+                }
+            }
+
+            const overallDot = document.getElementById('overallDot');
+            const overallText = document.getElementById('overallText');
+            if (anyRunning) {
+                overallDot.className = 'dot dot-green';
+                overallText.textContent = 'Syncing';
+            } else {
+                overallDot.className = 'dot dot-gray';
+                overallText.textContent = 'Idle';
+            }
+
+            if (activeSync) {
+                const date = new Date(activeSync.LastTimestamp);
+                document.getElementById('syncDate').textContent = 
+                    date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ', ' +
+                    date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                document.getElementById('syncKey').textContent = activeSync.LastKey;
+            } else {
+                const recent = getMostRecent(idx, vow);
+                if (recent) {
+                    const date = new Date(recent.LastTimestamp);
+                    document.getElementById('syncDate').textContent = 
+                        date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    document.getElementById('syncKey').textContent = recent.LastKey;
+                }
+            }
+
+            const { count: dbCount } = await supabase
+                .from('Property')
+                .select('*', { count: 'exact', head: true });
+            
+            const totalExpected = 1110000;
+            
+            document.getElementById('progress').textContent = 
+                `${(dbCount || 0).toLocaleString()} / ${totalExpected.toLocaleString()}`;
+            
+            const progressPct = totalExpected > 0 ? ((dbCount / totalExpected) * 100).toFixed(1) : 0;
+            const progressBar = document.getElementById('progressBar');
+            progressBar.textContent = progressPct + '%';
+            progressBar.style.width = Math.min(progressPct, 100) + '%';
+        }
+
+        function isRecentlyRunning(sync) {
+            if (sync.Status !== 'running') return false;
+            const lastUpdate = new Date(sync.UpdatedAt || sync.LastRunStarted);
+            return (Date.now() - lastUpdate.getTime()) < 300000;
+        }
+
+        function updateSyncDisplay(type, isRunning) {
+            const dot = document.getElementById(type + 'Dot');
+            const text = document.getElementById(type + 'Text');
+            const state = document.getElementById(type + 'State');
+            
+            if (isRunning) {
+                dot.className = 'dot dot-green';
+                text.textContent = 'Syncing...';
+                state.className = 'sync-state active';
+            } else {
+                dot.className = 'dot dot-gray';
+                text.textContent = 'Idle';
+                state.className = 'sync-state';
+            }
+        }
+
+        function getMostRecent(idx, vow) {
+            if (!idx) return vow;
+            if (!vow) return idx;
+            return new Date(idx.LastTimestamp) > new Date(vow.LastTimestamp) ? idx : vow;
+        }
+
+        async function updateSyncHistory() {
+            const { data } = await supabase
+                .from('SyncState')
+                .select('*')
+                .order('LastRunCompleted', { ascending: false });
+            
+            const tbody = document.getElementById('historyBody');
+            
+            if (!data || data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #a0aec0; padding: 30px;">No sync history available</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = data.map(sync => {
+                const status = sync.Status || 'idle';
+                const badgeClass = status === 'completed' ? 'badge-success' : 
+                                  status === 'running' ? 'badge-info' : 
+                                  status === 'failed' ? 'badge-danger' : 'badge-gray';
+                
+                const duration = calculateDuration(sync.LastRunStarted, sync.LastRunCompleted);
+                
+                return `
+                    <tr>
+                        <td><strong>${sync.SyncType}</strong></td>
+                        <td><span class="badge ${badgeClass}">${status.toUpperCase()}</span></td>
+                        <td>${(sync.TotalProcessed || 0).toLocaleString()}</td>
+                        <td>${sync.LastRunStarted ? new Date(sync.LastRunStarted).toLocaleString() : '--'}</td>
+                        <td>${sync.LastRunCompleted ? new Date(sync.LastRunCompleted).toLocaleString() : '--'}</td>
+                        <td>${duration}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function calculateDuration(start, end) {
+            if (!start || !end) return '--';
+            const diff = new Date(end) - new Date(start);
+            const minutes = Math.floor(diff / 60000);
+            const hours = Math.floor(minutes / 60);
+            return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+        }
+
+        async function updateCoverageStats() {
+            const { count: totalProps } = await supabase
+                .from('Property').select('*', { count: 'exact', head: true });
+            const { count: idxProps } = await supabase
+                .from('Property').select('*', { count: 'exact', head: true }).eq('ContractStatus', 'Available');
+            const { count: vowProps } = await supabase
+                .from('Property').select('*', { count: 'exact', head: true }).neq('ContractStatus', 'Available');
+
+            const { data: mediaStats } = await supabase.rpc('get_media_coverage_stats');
+            const totalMedia = mediaStats?.[0]?.total_media || 0;
+            const mediaProps = mediaStats?.[0]?.unique_properties || 0;
+
+            const { count: totalRooms } = await supabase
+                .from('PropertyRooms').select('*', { count: 'exact', head: true });
+            const { data: roomProps } = await supabase.rpc('get_distinct_rooms_properties');
+
+            const { count: totalOpenHouse } = await supabase
+                .from('OpenHouse').select('*', { count: 'exact', head: true });
+            const { data: openHouseProps } = await supabase.rpc('get_distinct_openhouse_properties');
+
+            document.getElementById('totalProps').textContent = (totalProps || 0).toLocaleString();
+            document.getElementById('idxProps').textContent = (idxProps || 0).toLocaleString();
+            document.getElementById('vowProps').textContent = (vowProps || 0).toLocaleString();
+            
+            document.getElementById('totalMedia').textContent = totalMedia.toLocaleString();
+            document.getElementById('mediaProps').textContent = mediaProps.toLocaleString();
+            document.getElementById('mediaCoverage').textContent = 
+                totalProps ? ((mediaProps / totalProps) * 100).toFixed(1) + '%' : '0%';
+
+            document.getElementById('totalRooms').textContent = (totalRooms || 0).toLocaleString();
+            document.getElementById('roomProps').textContent = (roomProps || 0).toLocaleString();
+            document.getElementById('roomsCoverage').textContent = 
+                totalProps ? ((roomProps / totalProps) * 100).toFixed(1) + '%' : '0%';
+
+            document.getElementById('totalOpenHouse').textContent = (totalOpenHouse || 0).toLocaleString();
+            document.getElementById('openHouseProps').textContent = (openHouseProps || 0).toLocaleString();
+            document.getElementById('openHouseCoverage').textContent = 
+                totalProps ? ((openHouseProps / totalProps) * 100).toFixed(1) + '%' : '0%';
+        }
+
+        function triggerSync(type) {
+            alert(`${type} sync will be triggered via Railway webhook (not yet implemented)`);
+        }
+
+        function pauseSync() {
+            alert('Pause functionality coming soon');
+        }
+
+        function resetSync() {
+            if (confirm('Reset sync state? This will start from the beginning.')) {
+                alert('Reset functionality coming soon');
+            }
+        }
+    </script>
+</body>
+</html>

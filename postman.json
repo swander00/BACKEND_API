@@ -1,0 +1,298 @@
+{
+	"info": {
+		"_postman_id": "f2a5fed8-0f27-4d6b-92df-c617cedad6bb",
+		"name": "RESO Web API (Odata) Examples",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "5205212",
+		"_collection_link": "https://ampbootstrapteam.postman.co/workspace/Team-Workspace~b55cafaa-7ad8-4d72-8548-7dbf3844655d/collection/5205212-f2a5fed8-0f27-4d6b-92df-c617cedad6bb?action=share&creator=5205212&source=collection_link"
+	},
+	"item": [
+		{
+			"name": "Metadata",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{WebApiAddress}}/odata/$metadata?$format=json",
+					"host": [
+						"{{WebApiAddress}}"
+					],
+					"path": [
+						"odata",
+						"$metadata"
+					],
+					"query": [
+						{
+							"key": "$format",
+							"value": "json"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Single Property Record",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{WebApiAddress}}/odata/Property('W9002096')",
+					"host": [
+						"{{WebApiAddress}}"
+					],
+					"path": [
+						"odata",
+						"Property('W9002096')"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Top Five Property Records",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{WebApiAddress}}/odata/Property?$top=5",
+					"host": [
+						"{{WebApiAddress}}"
+					],
+					"path": [
+						"odata",
+						"Property"
+					],
+					"query": [
+						{
+							"key": "$top",
+							"value": "5"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Single Property via Filter",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{WebApiAddress}}/odata/Property?$count=true&$filter=ListingKey eq 'X5734566'&top=0",
+					"host": [
+						"{{WebApiAddress}}"
+					],
+					"path": [
+						"odata",
+						"Property"
+					],
+					"query": [
+						{
+							"key": "$count",
+							"value": "true"
+						},
+						{
+							"key": "$filter",
+							"value": "ListingKey eq 'X5734566'"
+						},
+						{
+							"key": "top",
+							"value": "0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "All Offices",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{WebApiAddress}}/odata/Office?$top=5",
+					"host": [
+						"{{WebApiAddress}}"
+					],
+					"path": [
+						"odata",
+						"Office"
+					],
+					"query": [
+						{
+							"key": "$top",
+							"value": "5",
+							"description": "Limit result set size."
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "All Members",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{WebApiAddress}}/odata/Member?$top=5",
+					"host": [
+						"{{WebApiAddress}}"
+					],
+					"path": [
+						"odata",
+						"Member"
+					],
+					"query": [
+						{
+							"key": "$filter",
+							"value": "MemberKey eq 1111003",
+							"description": "Search for a specific member key.",
+							"disabled": true
+						},
+						{
+							"key": "$top",
+							"value": "5",
+							"description": "Limit result set size."
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Media",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{WebApiAddress}}/odata/Media?$top=5",
+					"host": [
+						"{{WebApiAddress}}"
+					],
+					"path": [
+						"odata",
+						"Media"
+					],
+					"query": [
+						{
+							"key": "$top",
+							"value": "5",
+							"description": "Limit result set size."
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Media Count",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{WebApiAddress}}/odata/Media?$top=0&$count=true&$filter=ModificationTimestamp ge 2023-06-12T12:55:00Z and ImageSizeDescription eq 'Largest'",
+					"host": [
+						"{{WebApiAddress}}"
+					],
+					"path": [
+						"odata",
+						"Media"
+					],
+					"query": [
+						{
+							"key": "$top",
+							"value": "0",
+							"description": "Limit result set size. 0 means no records."
+						},
+						{
+							"key": "$count",
+							"value": "true",
+							"description": "Return a count"
+						},
+						{
+							"key": "$filter",
+							"value": "ModificationTimestamp ge 2023-06-12T12:55:00Z and ImageSizeDescription eq 'Largest'"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Media Resource Record Key",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{WebApiAddress}}/odata/Media?$top=250&$filter=ResourceRecordKey in ('W9002096') and ImageSizeDescription eq 'Largest'&$select=MediaKey,MediaURL,ImageSizeDescription,MediaModificationTimestamp,MediaStatus,Order&$count=true",
+					"host": [
+						"{{WebApiAddress}}"
+					],
+					"path": [
+						"odata",
+						"Media"
+					],
+					"query": [
+						{
+							"key": "$top",
+							"value": "250",
+							"description": "Limit result set size."
+						},
+						{
+							"key": "$filter",
+							"value": "ResourceRecordKey in ('W9002096') and ImageSizeDescription eq 'Largest'"
+						},
+						{
+							"key": "$select",
+							"value": "MediaKey,MediaURL,ImageSizeDescription,MediaModificationTimestamp,MediaStatus,Order"
+						},
+						{
+							"key": "$count",
+							"value": "true"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ2ZW5kb3JcL3RycmViXC83IiwiYXVkIjoiQW1wVXNlcnNVYXQiLCJyb2xlcyI6WyJBbXBWZW5kb3IiXSwiaXNzIjoiYW1wcmUudXMiLCJleHAiOjE3MDIxNjgyNjQsImlhdCI6MTY4NjYxMjY2OSwic3ViamVjdFR5cGUiOiJ2ZW5kb3IiLCJzdWJqZWN0S2V5IjoiNyIsImp0aSI6IjA3NDBlMzUzOTU4N2JmNGMiLCJjdXN0b21lck5hbWUiOiJ0cnJlYiJ9.At5kSygoqjUh4fhXgzpAtkIVMNANNzA0zFMMfknKsCE",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "WebApiAddress",
+			"value": "https://query.ampre.ca",
+			"type": "string"
+		}
+	]
+}

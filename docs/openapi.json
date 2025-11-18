@@ -1,0 +1,312 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Property API",
+    "version": "1.0.0",
+    "description": "Frontend-facing API for property listings, details, search, and map.",
+    "contact": {
+      "name": "API Support"
+    }
+  },
+  "servers": [
+    { "url": "http://localhost:8080", "description": "Local" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "service": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/properties": {
+      "get": {
+        "summary": "List properties",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "pageSize", "in": "query", "schema": { "type": "integer", "default": 12, "maximum": 100 } },
+          { "name": "sortBy", "in": "query", "schema": { "type": "string", "enum": ["newest","oldest","price_asc","price_desc","sqft_asc","sqft_desc"], "default": "newest" } },
+          { "name": "city", "in": "query", "schema": { "type": "array", "items": { "type": "string" } }, "style": "form", "explode": true },
+          { "name": "propertyType", "in": "query", "schema": { "type": "array", "items": { "type": "string" } }, "style": "form", "explode": true },
+          { "name": "minPrice", "in": "query", "schema": { "type": "integer" } },
+          { "name": "maxPrice", "in": "query", "schema": { "type": "integer" } },
+          { "name": "minBedrooms", "in": "query", "schema": { "type": "integer" } },
+          { "name": "maxBedrooms", "in": "query", "schema": { "type": "integer" } },
+          { "name": "minBathrooms", "in": "query", "schema": { "type": "integer" } },
+          { "name": "maxBathrooms", "in": "query", "schema": { "type": "integer" } },
+          { "name": "minSquareFeet", "in": "query", "schema": { "type": "integer" } },
+          { "name": "maxSquareFeet", "in": "query", "schema": { "type": "integer" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "hasOpenHouse", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "hasVirtualTour", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "minGarageSpaces", "in": "query", "schema": { "type": "integer" } },
+          { "name": "minTotalParking", "in": "query", "schema": { "type": "integer" } },
+          { "name": "searchTerm", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of properties",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "properties": { "type": "array", "items": { "$ref": "#/components/schemas/PropertyCardResponse" } },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" },
+                    "totalCount": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/properties/{listingKey}": {
+      "get": {
+        "summary": "Get property details",
+        "parameters": [
+          { "name": "listingKey", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Property details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PropertyDetailsResponse" }
+              }
+            }
+          },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/api/properties/map": {
+      "get": {
+        "summary": "Get properties for map bounds",
+        "parameters": [
+          { "name": "bounds", "in": "query", "description": "JSON string of bounds {northEast:{lat,lng}, southWest:{lat,lng}}", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "minPrice", "in": "query", "schema": { "type": "integer" } },
+          { "name": "maxPrice", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Map popup properties",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "properties": { "type": "array", "items": { "$ref": "#/components/schemas/MapPopupPropertyResponse" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search": {
+      "get": {
+        "summary": "Search suggestions",
+        "parameters": [
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 10, "maximum": 50 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Suggestions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "listings": { "type": "array", "items": { "$ref": "#/components/schemas/PropertyCardResponse" } },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "totalCount": { "type": "integer" },
+                        "query": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "currentPage": { "type": "integer" },
+          "pageSize": { "type": "integer" },
+          "totalPages": { "type": "integer" },
+          "hasNextPage": { "type": "boolean" },
+          "hasPrevPage": { "type": "boolean" }
+        }
+      },
+      "PropertyCardResponse": {
+        "type": "object",
+        "properties": {
+          "listingKey": { "type": "string" },
+          "mlsNumber": { "type": "string" },
+          "fullAddress": { "type": "string" },
+          "city": { "type": "string" },
+          "stateOrProvince": { "type": "string" },
+          "cityRegion": { "type": "string" },
+          "status": { "type": "string" },
+          "mlsStatus": { "type": "string" },
+          "transactionType": { "type": "string" },
+          "isNewListing": { "type": "boolean" },
+          "listingAge": { "type": "string", "nullable": true },
+          "originalEntryTimestamp": { "type": "string" },
+          "modificationTimestamp": { "type": "string" },
+          "listPrice": { "type": "number" },
+          "originalListPrice": { "type": "number", "nullable": true },
+          "isPriceReduced": { "type": "boolean" },
+          "priceReductionAmount": { "type": "number", "nullable": true },
+          "priceReductionPercent": { "type": "number", "nullable": true },
+          "reductionNumber": { "type": "integer", "nullable": true },
+          "primaryImageUrl": { "type": "string", "nullable": true },
+          "mediaCount": { "type": "integer" },
+          "hasVirtualTour": { "type": "boolean" },
+          "virtualTourUrl": { "type": "string", "nullable": true },
+          "bedroomsDisplay": { "type": "string", "nullable": true },
+          "bedroomsAboveGrade": { "type": "integer", "nullable": true },
+          "bedroomsBelowGrade": { "type": "integer", "nullable": true },
+          "bathroomsDisplay": { "type": "string", "nullable": true },
+          "bathroomsTotalInteger": { "type": "number", "nullable": true },
+          "livingAreaMin": { "type": "integer", "nullable": true },
+          "livingAreaMax": { "type": "integer", "nullable": true },
+          "parkingTotal": { "type": "integer", "nullable": true },
+          "coveredSpaces": { "type": "integer", "nullable": true },
+          "parkingSpaces": { "type": "integer", "nullable": true },
+          "garageSpaces": { "type": "integer", "nullable": true },
+          "propertyType": { "type": "string", "nullable": true },
+          "propertySubType": { "type": "string", "nullable": true },
+          "openHouseDisplay": { "type": "string", "nullable": true },
+          "hasOpenHouseToday": { "type": "boolean", "nullable": true },
+          "hasOpenHouseTomorrow": { "type": "boolean", "nullable": true },
+          "hasNextWeekendOpenHouse": { "type": "boolean", "nullable": true }
+        }
+      },
+      "PropertyDetailsResponse": {
+        "type": "object",
+        "properties": {
+          "listingKey": { "type": "string" },
+          "mlsNumber": { "type": "string" },
+          "mlsStatus": { "type": "string" },
+          "transactionType": { "type": "string" },
+          "statusDates": { "type": "object" },
+          "daysOnMarket": { "type": "integer", "nullable": true },
+          "isNewListing": { "type": "boolean" },
+          "modificationTimestamp": { "type": "string" },
+          "viewCount": { "type": "integer" },
+          "saveCount": { "type": "integer" },
+          "todayViews": { "type": "integer", "nullable": true },
+          "todaySaves": { "type": "integer", "nullable": true },
+          "fullAddress": { "type": "string" },
+          "city": { "type": "string" },
+          "stateOrProvince": { "type": "string" },
+          "community": { "type": "string", "nullable": true },
+          "countyOrParish": { "type": "string", "nullable": true },
+          "postalCode": { "type": "string", "nullable": true },
+          "latitude": { "type": "number", "nullable": true },
+          "longitude": { "type": "number", "nullable": true },
+          "listPrice": { "type": "number" },
+          "originalListPrice": { "type": "number", "nullable": true },
+          "closePrice": { "type": "number", "nullable": true },
+          "priceReductionAmount": { "type": "number", "nullable": true },
+          "priceReductionPercent": { "type": "number", "nullable": true },
+          "reductionNumber": { "type": "integer", "nullable": true },
+          "originalEntryTimestamp": { "type": "string" },
+          "taxAnnualAmount": { "type": "number", "nullable": true },
+          "taxYear": { "type": "integer", "nullable": true },
+          "media": { "type": "array", "items": { "type": "object" } },
+          "primaryImageUrl": { "type": "string", "nullable": true },
+          "mediaCount": { "type": "integer" },
+          "hasVirtualTour": { "type": "boolean" },
+          "virtualTourUrl": { "type": "string", "nullable": true },
+          "bedroomsAboveGrade": { "type": "integer", "nullable": true },
+          "bedroomsBelowGrade": { "type": "integer", "nullable": true },
+          "bedroomsDisplay": { "type": "string", "nullable": true },
+          "bathroomsDisplay": { "type": "string", "nullable": true },
+          "bathroomsTotalInteger": { "type": "number", "nullable": true },
+          "kitchensAboveGrade": { "type": "integer", "nullable": true },
+          "kitchensBelowGrade": { "type": "integer", "nullable": true },
+          "livingAreaMin": { "type": "integer", "nullable": true },
+          "livingAreaMax": { "type": "integer", "nullable": true },
+          "lotSizeWidth": { "type": "number", "nullable": true },
+          "lotSizeDepth": { "type": "number", "nullable": true },
+          "lotSizeAcres": { "type": "number", "nullable": true },
+          "lotSizeUnits": { "type": "string", "nullable": true },
+          "approximateAge": { "type": "string", "nullable": true },
+          "propertyType": { "type": "string", "nullable": true },
+          "propertySubType": { "type": "string", "nullable": true },
+          "architecturalStyle": { "type": "string", "nullable": true },
+          "basementStatus": { "type": "string", "nullable": true },
+          "basementEntrance": { "type": "string", "nullable": true },
+          "basementKitchen": { "type": "boolean", "nullable": true },
+          "basementRental": { "type": "boolean", "nullable": true },
+          "coveredSpaces": { "type": "integer", "nullable": true },
+          "parkingSpaces": { "type": "integer", "nullable": true },
+          "parkingTotal": { "type": "integer", "nullable": true },
+          "garageSpaces": { "type": "integer", "nullable": true },
+          "possession": { "type": "string", "nullable": true },
+          "publicRemarks": { "type": "string", "nullable": true },
+          "openHouseDisplay": { "type": "string", "nullable": true }
+        }
+      },
+      "MapPopupPropertyResponse": {
+        "type": "object",
+        "properties": {
+          "listingKey": { "type": "string" },
+          "status": { "type": "string" },
+          "propertySubType": { "type": "string" },
+          "fullAddress": { "type": "string" },
+          "city": { "type": "string" },
+          "stateOrProvince": { "type": "string" },
+          "coordinates": {
+            "type": "object",
+            "properties": {
+              "latitude": { "type": "number" },
+              "longitude": { "type": "number" }
+            }
+          },
+          "primaryImageUrl": { "type": "string", "nullable": true },
+          "listPrice": { "type": "number" },
+          "listedAt": { "type": "string" },
+          "bedroomsDisplay": { "type": "string", "nullable": true },
+          "bathroomsDisplay": { "type": "string", "nullable": true },
+          "parkingTotal": { "type": "integer", "nullable": true },
+          "coveredSpaces": { "type": "integer", "nullable": true },
+          "parkingSpaces": { "type": "integer", "nullable": true },
+          "livingAreaMin": { "type": "integer", "nullable": true },
+          "livingAreaMax": { "type": "integer", "nullable": true }
+        }
+      }
+    }
+  }
+}
+

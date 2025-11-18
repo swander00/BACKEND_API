@@ -1,0 +1,190 @@
+// ===============================================================================================
+// MATERIALIZED VIEWS SETUP SCRIPT
+// ===============================================================================================
+// Creates PropertyView materialized view for the API
+// Other views (RoomDetailsView, PropertySuggestionView, etc.) will be rebuilt later
+// Run this script once to set up the PropertyView
+// ===============================================================================================
+
+import { Client } from 'pg';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config({ path: './.env.local' });
+if (!process.env.PORT) {
+  dotenv.config({ path: './environment.env' });
+}
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const DATABASE_URL = process.env.DATABASE_URL;
+
+if (!DATABASE_URL) {
+  console.error('❌ Missing DATABASE_URL environment variable');
+  process.exit(1);
+}
+
+// ===============================================================================================
+// [1] CREATE HELPER FUNCTIONS AND STUB TABLES
+// ===============================================================================================
+
+async function createHelperFunctions(client) {
+  console.log('\n📋 Creating helper functions...');
+  
+  const helpersPath = join(__dirname, '../docs/Database scripts/PropertyViewCalculationHelpers.sql');
+  const helpersSQL = readFileSync(helpersPath, 'utf8');
+  
+  try {
+    await client.query(helpersSQL);
+    console.log('✓ Helper functions created');
+  } catch (error) {
+    if (error.message.includes('already exists')) {
+      console.log('✓ Helper functions already exist (skipping)');
+    } else {
+      throw error;
+    }
+  }
+}
+
+async function createStubTables(client) {
+  console.log('\n📋 Checking for required tables...');
+  
+  // Check if PriceReductionHistory exists, create stub if not
+  const checkTableSQL = `
+    SELECT EXISTS (
+      SELECT FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name = 'PriceReductionHistory'
+    );
+  `;
+  
+  const result = await client.query(checkTableSQL);
+  const tableExists = result.rows[0].exists;
+  
+  if (!tableExists) {
+    console.log('  → Creating stub PriceReductionHistory table...');
+    const createTableSQL = `
+      CREATE TABLE IF NOT EXISTS public."PriceReductionHistory" (
+        "ListingKey" TEXT,
+        "PriceReductionAmount" NUMERIC,
+        "PriceReductionPercent" NUMERIC,
+        "ReductionNumber" INTEGER,
+        "PriceChangeTimestamp" TIMESTAMP
+      );
+    `;
+    await client.query(createTableSQL);
+    console.log('  ✓ PriceReductionHistory stub table created');
+  } else {
+    console.log('  ✓ PriceReductionHistory table exists');
+  }
+}
+
+// ===============================================================================================
+// [2] CREATE PROPERTY VIEW
+// ===============================================================================================
+
+async function createPropertyView(client) {
+  console.log('\n📋 Creating PropertyView...');
+  
+  // Read PropertyView.sql - it should already include the CTEs inline
+  const viewPath = join(__dirname, '../docs/Database scripts/PropertyView.sql');
+  const viewSQL = readFileSync(viewPath, 'utf8');
+  
+  try {
+    // Execute the entire SQL file
+    // PostgreSQL can handle multiple statements separated by semicolons
+    await client.query(viewSQL);
+    console.log('✓ PropertyView created');
+  } catch (error) {
+    console.error('❌ Error creating PropertyView:', error.message);
+    if (error.position) {
+      console.error(`   Error at position: ${error.position}`);
+    }
+    if (error.hint) {
+      console.error(`   Hint: ${error.hint}`);
+    }
+    throw error;
+  }
+}
+
+// ===============================================================================================
+// [3] REFRESH PROPERTY VIEW
+// ===============================================================================================
+
+async function refreshPropertyView(client) {
+  console.log('\n🔄 Refreshing PropertyView...');
+  
+  try {
+    console.log('  → Refreshing PropertyView...');
+    await client.query(`REFRESH MATERIALIZED VIEW CONCURRENTLY public."PropertyView"`);
+    console.log('  ✓ PropertyView refreshed');
+  } catch (error) {
+    // Fallback to non-concurrent refresh
+    console.log('  → Falling back to non-concurrent refresh...');
+    await client.query(`REFRESH MATERIALIZED VIEW public."PropertyView"`);
+    console.log('  ✓ PropertyView refreshed (non-concurrent)');
+  }
+}
+
+// ===============================================================================================
+// [4] RELOAD POSTGREST SCHEMA CACHE
+// ===============================================================================================
+
+async function reloadPostgRESTSchema(client) {
+  console.log('\n🔄 Reloading PostgREST schema cache...');
+  
+  try {
+    await client.query(`NOTIFY pgrst, 'reload schema';`);
+    console.log('✓ PostgREST schema cache reload notification sent');
+  } catch (error) {
+    console.warn('⚠ PostgREST schema reload error:', error.message);
+    console.warn('  You may need to manually reload the schema cache in Supabase Dashboard');
+  }
+}
+
+// ===============================================================================================
+// [8] MAIN EXECUTION
+// ===============================================================================================
+
+async function main() {
+  const client = new Client({ connectionString: DATABASE_URL });
+  
+  try {
+    await client.connect();
+    console.log('✓ Connected to database\n');
+    
+    // Step 1: Create helper functions and stub tables
+    await createHelperFunctions(client);
+    await createStubTables(client);
+    
+    // Step 2: Create PropertyView (main view)
+    await createPropertyView(client);
+    
+    // Step 3: Refresh PropertyView
+    await refreshPropertyView(client);
+    
+    // Step 4: Reload PostgREST schema cache
+    await reloadPostgRESTSchema(client);
+    
+    console.log('\n✅ PropertyView created and refreshed successfully!');
+    console.log('\n📝 Next steps:');
+    console.log('   1. Verify PropertyView in Supabase Dashboard > Database > Tables');
+    console.log('   2. Test API endpoints to ensure they work correctly');
+    console.log('   3. Set up scheduled refresh via REFRESH_MVS_INTERVAL_MS or cron job');
+    console.log('   4. Rebuild other views (RoomDetailsView, PropertySuggestionView, etc.) later as needed');
+    
+  } catch (error) {
+    console.error('\n❌ Setup failed:', error.message);
+    console.error(error.stack);
+    process.exit(1);
+  } finally {
+    await client.end();
+  }
+}
+
+main();
+

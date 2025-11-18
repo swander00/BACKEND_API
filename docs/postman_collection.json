@@ -1,0 +1,54 @@
+{
+  "info": {
+    "name": "Property API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "List Properties",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/properties?page=1&pageSize=12"
+      }
+    },
+    {
+      "name": "Property Details",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/properties/{{listingKey}}"
+      }
+    },
+    {
+      "name": "Map Properties",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/properties/map?bounds=%7B%22northEast%22%3A%7B%22lat%22%3A43.8%2C%22lng%22%3A-79.2%7D%2C%22southWest%22%3A%7B%22lat%22%3A43.4%2C%22lng%22%3A-79.6%7D%7D"
+      }
+    },
+    {
+      "name": "Search Suggestions",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/search?q=oakville&limit=5"
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "listingKey", "value": "W12390646" }
+  ]
+}
+

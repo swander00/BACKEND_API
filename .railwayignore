@@ -1,0 +1,68 @@
+# Railway ignore file (similar to .gitignore)
+# Files/directories to exclude from Railway deployment
+
+# Development files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Test files
+test
+tests
+*.test.js
+*.spec.js
+test-*.js
+scripts/smoke-test.js
+scripts/test-production-features.js
+
+# Documentation (but include openapi.json)
+docs/*
+!docs/openapi.json
+*.md
+README.md
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Environment (should be set via Railway Variables)
+environment.env
+.env
+.env.local
+.env.*.local
+
+# Logs (created at runtime)
+logs
+*.log
+pm2-*.log
+
+# Node modules (installed by Railway)
+node_modules
+
+# Build artifacts
+dist
+build
+*.tsbuildinfo
+
+# PM2 (if using Docker, PM2 config not needed)
+ecosystem.config.js
+.pm2
+
+# Docker (if using Node.js deployment)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Misc
+coverage
+.nyc_output
+.trreb-dashboard
+.trreb-dashboard
+public/dashboard.html
+public/docs.html
+public/api-test.html
+TESTING_SUMMARY.md
+

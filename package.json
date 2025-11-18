@@ -1,0 +1,41 @@
+{
+  "name": "trreb-sync-minimal",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "start:pm2": "pm2 start ecosystem.config.js",
+    "start:pm2:prod": "pm2 start ecosystem.config.js --env production",
+    "stop:pm2": "pm2 stop ecosystem.config.js",
+    "restart:pm2": "pm2 restart ecosystem.config.js",
+    "logs:pm2": "pm2 logs trreb-api",
+    "monit:pm2": "pm2 monit",
+    "sync": "node index.js",
+    "sync:all": "node sync-all.js",
+    "sync:idx": "node index.js --type=IDX",
+    "sync:vow": "node index.js --type=VOW",
+    "sync:reset": "node sync-all.js --reset",
+    "test": "node index.js --limit=50",
+    "test:smoke": "node scripts/smoke-test.js",
+    "test:production": "node scripts/test-production-features.js",
+    "test:api-fixes": "node test-api-fixes.js",
+    "test:openai": "node scripts/test-openai.js",
+    "verify:parking": "node scripts/verify-parking-columns.js",
+    "geocode": "node scripts/geocode-properties.js",
+    "build": "echo 'No build step required'",
+    "refresh:mvs": "node scripts/refresh-mvs.js",
+    "reload:schema": "node scripts/reload-postgrest-schema.js",
+    "docker:build": "docker build -t trreb-api .",
+    "docker:run": "docker run -p 8080:8080 --env-file environment.env trreb-api",
+    "docker:compose:up": "docker-compose up -d",
+    "docker:compose:down": "docker-compose down",
+    "docker:compose:logs": "docker-compose logs -f api"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "openai": "^6.9.0",
+    "pg": "^8.12.0"
+  }
+}
