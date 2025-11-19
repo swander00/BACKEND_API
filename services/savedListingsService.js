@@ -7,8 +7,6 @@
 import { getSupabaseAdmin } from '../utils/supabaseAdmin.js';
 import { logger } from '../utils/logger.js';
 
-const admin = getSupabaseAdmin();
-
 export class SavedListingsService {
   /**
    * Get saved listings for a user with pagination
@@ -16,6 +14,7 @@ export class SavedListingsService {
   async getSavedListings(userId, options = {}) {
     const { page = 1, limit = 20, tag } = options;
     const offset = (page - 1) * limit;
+    const admin = getSupabaseAdmin();
 
     let query = admin
       .from('UserSavedListings')
@@ -61,6 +60,7 @@ export class SavedListingsService {
    * Get a single saved listing
    */
   async getSavedListing(userId, id) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserSavedListings')
       .select('*')
@@ -83,6 +83,7 @@ export class SavedListingsService {
    * Get saved listing by MLS number
    */
   async getSavedListingByMls(userId, mlsNumber) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserSavedListings')
       .select('*')
@@ -103,6 +104,7 @@ export class SavedListingsService {
    */
   async saveListing(userId, mlsNumber, options = {}) {
     const { Notes, Tags } = options;
+    const admin = getSupabaseAdmin();
 
     const { data, error } = await admin
       .from('UserSavedListings')
@@ -145,6 +147,7 @@ export class SavedListingsService {
     }
 
     filteredUpdates.UpdatedAt = new Date().toISOString();
+    const admin = getSupabaseAdmin();
 
     const { data, error } = await admin
       .from('UserSavedListings')
@@ -169,6 +172,7 @@ export class SavedListingsService {
    * Delete a saved listing
    */
   async deleteSavedListing(userId, id) {
+    const admin = getSupabaseAdmin();
     const { error } = await admin
       .from('UserSavedListings')
       .delete()
@@ -185,6 +189,7 @@ export class SavedListingsService {
    * Get all unique tags for a user
    */
   async getUserTags(userId) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserSavedListings')
       .select('Tags')

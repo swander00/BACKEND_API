@@ -7,13 +7,12 @@
 import { getSupabaseAdmin } from '../utils/supabaseAdmin.js';
 import { logger } from '../utils/logger.js';
 
-const admin = getSupabaseAdmin();
-
 export class LikesService {
   /**
    * Get all liked MLS numbers for a user
    */
   async getLikedProperties(userId) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserLikedProperties')
       .select('MlsNumber')
@@ -32,6 +31,7 @@ export class LikesService {
    * Check if a property is liked
    */
   async isLiked(userId, mlsNumber) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserLikedProperties')
       .select('Id')
@@ -51,6 +51,7 @@ export class LikesService {
    * Like a property (idempotent)
    */
   async likeProperty(userId, mlsNumber) {
+    const admin = getSupabaseAdmin();
     const { error } = await admin
       .from('UserLikedProperties')
       .upsert({
@@ -71,6 +72,7 @@ export class LikesService {
    * Unlike a property (idempotent)
    */
   async unlikeProperty(userId, mlsNumber) {
+    const admin = getSupabaseAdmin();
     const { error } = await admin
       .from('UserLikedProperties')
       .delete()
@@ -98,6 +100,7 @@ export class LikesService {
       LikedAt: now,
     }));
 
+    const admin = getSupabaseAdmin();
     const { error } = await admin
       .from('UserLikedProperties')
       .upsert(records, {

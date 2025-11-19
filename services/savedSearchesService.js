@@ -7,13 +7,12 @@
 import { getSupabaseAdmin } from '../utils/supabaseAdmin.js';
 import { logger } from '../utils/logger.js';
 
-const admin = getSupabaseAdmin();
-
 export class SavedSearchesService {
   /**
    * Get all saved searches for a user
    */
   async getSavedSearches(userId) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserSavedSearches')
       .select('*')
@@ -32,6 +31,7 @@ export class SavedSearchesService {
    * Get a single saved search
    */
   async getSavedSearch(userId, id) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserSavedSearches')
       .select('*')
@@ -71,6 +71,7 @@ export class SavedSearchesService {
       throw new Error(`AlertFrequency must be one of: ${validFrequencies.join(', ')}`);
     }
 
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserSavedSearches')
       .insert({
@@ -118,6 +119,7 @@ export class SavedSearchesService {
 
     filteredUpdates.UpdatedAt = new Date().toISOString();
 
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserSavedSearches')
       .update(filteredUpdates)
@@ -141,6 +143,7 @@ export class SavedSearchesService {
    * Delete a saved search
    */
   async deleteSavedSearch(userId, id) {
+    const admin = getSupabaseAdmin();
     const { error } = await admin
       .from('UserSavedSearches')
       .delete()
@@ -171,6 +174,7 @@ export class SavedSearchesService {
       updates.LastRunAt = LastRunAt;
     }
 
+    const admin = getSupabaseAdmin();
     const { error } = await admin
       .from('UserSavedSearches')
       .update(updates)
@@ -186,6 +190,7 @@ export class SavedSearchesService {
    * Get all active saved searches (with alerts enabled)
    */
   async getActiveSearches() {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserSavedSearches')
       .select('*')

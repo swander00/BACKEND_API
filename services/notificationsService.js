@@ -7,14 +7,13 @@
 import { getSupabaseAdmin } from '../utils/supabaseAdmin.js';
 import { logger } from '../utils/logger.js';
 
-const admin = getSupabaseAdmin();
-
 export class NotificationsService {
   /**
    * Get notifications for a user with pagination
    */
   async getNotifications(userId, options = {}) {
     const { unreadOnly = false, limit = 20, offset = 0 } = options;
+    const admin = getSupabaseAdmin();
 
     let query = admin
       .from('UserNotifications')
@@ -54,6 +53,7 @@ export class NotificationsService {
    * Get unread count only (lightweight)
    */
   async getUnreadCount(userId) {
+    const admin = getSupabaseAdmin();
     const { count, error } = await admin
       .from('UserNotifications')
       .select('*', { count: 'exact', head: true })
@@ -80,6 +80,7 @@ export class NotificationsService {
       throw new Error(`Type must be one of: ${validTypes.join(', ')}`);
     }
 
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserNotifications')
       .insert({
@@ -105,6 +106,7 @@ export class NotificationsService {
    * Mark notification as read
    */
   async markAsRead(userId, id) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserNotifications')
       .update({
@@ -131,6 +133,7 @@ export class NotificationsService {
    * Mark all notifications as read
    */
   async markAllAsRead(userId) {
+    const admin = getSupabaseAdmin();
     const { data, error, count } = await admin
       .from('UserNotifications')
       .update({
@@ -153,6 +156,7 @@ export class NotificationsService {
    * Delete a notification
    */
   async deleteNotification(userId, id) {
+    const admin = getSupabaseAdmin();
     const { error } = await admin
       .from('UserNotifications')
       .delete()

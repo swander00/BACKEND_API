@@ -7,13 +7,12 @@
 import { getSupabaseAdmin } from '../utils/supabaseAdmin.js';
 import { logger } from '../utils/logger.js';
 
-const admin = getSupabaseAdmin();
-
 export class ViewingHistoryService {
   /**
    * Track a property view (upsert, incrementing view count)
    */
   async trackView(userId, mlsNumber) {
+    const admin = getSupabaseAdmin();
     // Check if record exists
     const { data: existing } = await admin
       .from('UserViewingHistory')
@@ -60,6 +59,7 @@ export class ViewingHistoryService {
    */
   async getViewingHistory(userId, options = {}) {
     const { limit = 20, offset = 0 } = options;
+    const admin = getSupabaseAdmin();
 
     const { data, error, count } = await admin
       .from('UserViewingHistory')
@@ -85,6 +85,7 @@ export class ViewingHistoryService {
    * Delete a viewing history entry
    */
   async deleteViewingHistory(userId, id) {
+    const admin = getSupabaseAdmin();
     const { error } = await admin
       .from('UserViewingHistory')
       .delete()
@@ -101,6 +102,7 @@ export class ViewingHistoryService {
    * Clear all viewing history for a user
    */
   async clearViewingHistory(userId) {
+    const admin = getSupabaseAdmin();
     const { error } = await admin
       .from('UserViewingHistory')
       .delete()

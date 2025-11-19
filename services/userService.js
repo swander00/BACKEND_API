@@ -7,13 +7,12 @@
 import { getSupabaseAdmin } from '../utils/supabaseAdmin.js';
 import { logger } from '../utils/logger.js';
 
-const admin = getSupabaseAdmin();
-
 export class UserService {
   /**
    * Get user profile
    */
   async getProfile(userId) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserProfiles')
       .select('*')
@@ -46,6 +45,7 @@ export class UserService {
       delete updates.Id;
     }
 
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserProfiles')
       .update({ 
@@ -69,6 +69,7 @@ export class UserService {
    */
   async updateLastLogin(userId) {
     try {
+      const admin = getSupabaseAdmin();
       await admin
         .from('UserProfiles')
         .update({ LastLoginAt: new Date().toISOString() })
@@ -84,6 +85,7 @@ export class UserService {
    */
   async syncProfileFromAuth(userId) {
     try {
+      const admin = getSupabaseAdmin();
       // Get user from auth
       const { data: { user }, error: authError } = await admin.auth.admin.getUserById(userId);
       
@@ -126,6 +128,7 @@ export class UserService {
    * Get buyer preferences
    */
   async getPreferences(userId) {
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserBuyerPreferences')
       .select('*')
@@ -155,6 +158,7 @@ export class UserService {
       }
     }
 
+    const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from('UserBuyerPreferences')
       .upsert({
