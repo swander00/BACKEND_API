@@ -335,9 +335,9 @@ export class UserService {
       .from('UserProfiles')
       .update({ LastLoginAt: new Date().toISOString() })
       .eq('Id', userId);
+    }
   }
-}
-```
+  ```
 
 ### Background Jobs
 

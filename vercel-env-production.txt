@@ -1,3 +1,0 @@
-NEXT_PUBLIC_BACKEND_URL=https://apibackend-production-696e.up.railway.app
-NEXT_PUBLIC_API_URL=https://apibackend-production-696e.up.railway.app
-
