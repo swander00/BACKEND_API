@@ -1,119 +1,1175 @@
-## Master API Integration Contract
+# Master API Integration Contract
+## Complete User Infrastructure Architecture & Implementation Plan
 
-### 1. Purpose & Scope
-- Establish the single source of truth for how backend services expose listing data to frontend clients across grid, detail, suggestion, and map experiences.
-- Align data sourcing with enforced rules: **all listing data must be served from `PropertyCardView`, `PropertyDetailsView`, `RoomDetailsView`, and `Media`** (for galleries) plus auxiliary services (analytics, agent CRM, AI summaries). Raw tables such as `Property`, `PropertyRooms`, and `OpenHouse` must never be queried directly by public APIs.
-- Define both the frontend payload contracts and the backend-internal service responsibilities that produce them.
+---
 
-### 2. Data Source Principles
-- `PropertyCardView`: optimized projection for search/list/map results and autocomplete listing suggestions.
-- `PropertyDetailsView`: canonical view for property detail payloads, highlights, pricing history, taxes, utilities, and engagement counters.
-- `RoomDetailsView`: denormalized room array consumed inside property detail experiences.
-- `Media`: authoritative gallery source; `PrimaryImageUrl` and ordered arrays derive from this table only.
-- Analytics Service: provides cumulative `ViewCount` / `SaveCount` (already materialized in `PropertyDetailsView`) and **optional** `todayViews` / `todaySaves`.
-- Agent CRM Service: owns agent profile, contact, and performance metrics; backend proxies or supplies placeholders until live.
-- AI Summary Service: sends `{ summary, highlights[], confidence }`; backend passes through unchanged when available.
+## Table of Contents
 
-### 3. Endpoint Overview
-| Endpoint | Response | Data Sources | Notes |
-| --- | --- | --- | --- |
-| `GET /api/properties` | `PropertyCardResponse[]` + pagination | `PropertyCardView`, `Media` | Supports all search and filter criteria defined in `BACKEND_API_QUICK_REFERENCE.md`. |
-| `GET /api/properties/{listingKey}` | `PropertyDetailsResponse` | `PropertyDetailsView`, `RoomDetailsView`, `Media`, Analytics, Agent CRM, AI Summary | Single listing detail experience for desktop + mobile. |
-| `GET /api/search?q=` | `PropertySuggestionResponse` | `PropertyCardView` | Location taxonomy remains frontend-managed; backend returns listing suggestions only. |
-| `GET /api/properties/map` | `MapPopupPropertyResponse[]` | `PropertyCardView`, `Media` | Same filtering as `/api/properties` plus map bounds. |
-| `GET /api/media/{listingKey}` *(internal)* | Media hydration service | `Media` | Used by backend composition layer; not exposed to FE once master payloads inline media arrays. |
+1. [Executive Summary](#executive-summary)
+2. [Conceptual Architecture](#conceptual-architecture)
+3. [Authentication Flow](#authentication-flow)
+4. [Onboarding Strategy](#onboarding-strategy)
+5. [Backend Architecture](#backend-architecture)
+6. [Frontend Architecture](#frontend-architecture)
+7. [API Endpoints Specification](#api-endpoints-specification)
+8. [Data Flow & State Management](#data-flow--state-management)
+9. [User Flows](#user-flows)
+10. [Caching & Performance Strategy](#caching--performance-strategy)
+11. [Real-time Features](#real-time-features)
+12. [Error Handling & Edge Cases](#error-handling--edge-cases)
+13. [Security Considerations](#security-considerations)
+14. [Implementation Phases](#implementation-phases)
 
-### 4. Payload Contracts
+---
 
-#### 4.1 `PropertyCardResponse`
-| Field Group | Fields | Source | Notes |
-| --- | --- | --- | --- |
-| Identity & Location | `listingKey`, `mlsNumber`, `fullAddress`, `city`, `stateOrProvince`, `cityRegion` | `PropertyCardView` | `fullAddress` is the only address string FE displays. |
-| Status & Timeline | `status`, `mlsStatus`, `transactionType`, `isNewListing`, `listingAge`, `originalEntryTimestamp`, `modificationTimestamp` | `PropertyCardView` | Use `Status` (display) + `MlsStatus` (raw). |
-| Pricing | `listPrice`, `originalListPrice`, `isPriceReduced`, `priceReductionAmount`, `priceReductionPercent`, `reductionNumber` | `PropertyCardView` | Reduction metrics already formatted per data rules. |
-| Media | `primaryImageUrl`, `media` (array of `{id,url,alt}`), `mediaCount`, `hasVirtualTour`, `virtualTourUrl` | `PropertyCardView` + `Media` | `media` array ordered by `PreferredPhotoYN DESC, Order ASC`. |
-| Quick Specs | `bedroomsDisplay`, `bedroomsAboveGrade`, `bedroomsBelowGrade`, `bathroomsDisplay`, `bathroomsTotalInteger`, `livingAreaMin`, `livingAreaMax`, `parkingTotal`, `coveredSpaces`, `parkingSpaces`, `garageSpaces` | `PropertyCardView` | `garageSpaces` derived from `coveredSpaces` when not explicitly available; FE displays dedicated badge. |
-| Badges & Context | `propertyType`, `propertySubType`, `openHouseDisplay`, `hasOpenHouseToday`, `hasOpenHouseTomorrow`, `hasNextWeekendOpenHouse` | `PropertyCardView` | `openHouseDisplay` is the only open-house text surface requires. |
-| Interaction State | `images` (hero carousel reuse of `media`), `virtualTourUrl` | `Media` | Provided so FE can preload the gallery without additional fetches. |
+## Executive Summary
 
-#### 4.2 `PropertyDetailsResponse`
-| Section | Fields | Source | Notes |
-| --- | --- | --- | --- |
-| Identity & Status | `listingKey`, `mlsNumber`, `mlsStatus`, `transactionType`, `statusDates` (`purchaseContractDate`, `suspendedDate`, `terminatedDate`, `expirationDate`), `daysOnMarket`, `isNewListing`, `modificationTimestamp` | `PropertyDetailsView` | Aligns with desktop + mobile header badges. |
-| Engagement | `viewCount`, `saveCount`, `todayViews?`, `todaySaves?` | `PropertyDetailsView` + Analytics | Day-level metrics optional; omit when unavailable. |
-| Address & Geo | `fullAddress`, `streetNumber`, `streetName`, `streetSuffix`, `unitNumber`, `city`, `community`, `countyOrParish`, `stateOrProvince`, `postalCode`, `latitude`, `longitude` | `PropertyDetailsView` | `fullAddress` drives display; granular fields for map/share actions. |
-| Pricing & History | `listPrice`, `originalListPrice`, `closePrice`, `priceReductionAmount`, `priceReductionPercent`, `reductionNumber`, `originalEntryTimestamp`, `listDate`, `modificationTimestamp` | `PropertyDetailsView` | History card reuses these fields. |
-| Taxes | `taxAnnualAmount`, `taxYear` | `PropertyDetailsView` | FE refers to `PropertyTaxes`. |
-| Media & Tours | `media` array, `primaryImageUrl`, `mediaCount`, `hasVirtualTour`, `virtualTourUrl`, optional `order`, `caption`, `dimensions` | `Media` | Additional metadata included when stored; otherwise omitted. |
-| Highlights / Specs Grid | `bedroomsAboveGrade`, `bedroomsBelowGrade`, `bedroomsDisplay`, `bathroomsDisplay`, `bathroomsTotalInteger`, `kitchensAboveGrade`, `kitchensBelowGrade`, `livingAreaMin`, `livingAreaMax`, `lotSizeWidth`, `lotSizeDepth`, `lotSizeAcres`, `lotSizeUnits`, `approximateAge`, `propertyType`, `propertySubType`, `architecturalStyle`, `basementStatus`, `basementEntrance`, `basementKitchen`, `basementRental`, `coveredSpaces`, `parkingSpaces`, `parkingTotal`, `garageSpaces`, `possession` | `PropertyDetailsView` | `garageSpaces` derived if absent. |
-| Narrative | `publicRemarks`, `aiSummary?` (`summary`, `highlights[]`, `confidence`) | `PropertyDetailsView` + AI service | Fallback to remarks when AI block missing. |
-| Listing History | Array of `{ listDate, listPrice, closePrice, daysOnMarket, priceReductionAmount?, priceReductionPercent? }` | `PropertyDetailsView` | Provide chronological entries when view exposes them. |
-| Property Information Cards | Interior, exterior, amenities, ownership, utilities, pool/waterfront, features fields exactly as enumerated in frontend doc (e.g., `interiorFeatures`, `exteriorFeatures`, `propertyFeatures`, `cooling`, `heatType`, `sewer`, `waterSource`, `associationFee`, `associationFeeIncludes`, `additionalMonthlyFee`, `associationAmenities`, `maintenanceFee`, `maintenanceFeeSchedule`, `potl`, `petsAllowed`, `rentIncludes`, `taxAnnualAmount`, `taxYear`, `furnished`, `locker`, `balconyType`, `poolFeatures`, `waterfrontFeatures`, `waterBodyName`, `waterView`, `waterfrontYN`, `fireplaceYN`) | `PropertyDetailsView` | Maintain exact casing to match FE expectations. |
-| Rooms Drawer | `summary` (`totalBedrooms`, `totalBathrooms`, `squareFootage`, `roomCount`), `rooms[]` from `RoomDetailsView` with `{ id, roomType, level, dimensions, features[] }` | `RoomDetailsView` | Backend ensures ordering by level then room order. |
-| Open House | `openHouseDisplay`, `openHouseEvents[]?` (future) | `PropertyDetailsView` | Mobile may also use `openHouseDate` + `openHouseDayTime`; convert upstream to display string. |
-| Agent Contact Card | `agent` object `{ name, title, company, avatarUrl, phone, email, messageUrl, rating?, reviewCount?, propertiesSold? }` | Agent CRM (or placeholder service) | Placeholders allowed until CRM integration live. |
+This document defines a complete user infrastructure for a real estate application built on Supabase Auth with Google OAuth. The architecture separates concerns between:
 
-#### 4.3 `PropertySuggestionResponse`
-- Structure:
-  ```json
-  {
-    "listings": PropertyCardResponse[],
-    "meta": {
-      "totalCount": number,
-      "query": string
-    }
+- **Backend (Node.js/Express)**: Business logic, data validation, notification processing, search alert execution
+- **Frontend (Next.js)**: UI/UX, client-side state, optimistic updates, real-time subscriptions
+- **Supabase**: Authentication, database, real-time subscriptions, RLS policies
+
+**Key Design Principles:**
+- User-centric data model with clear separation between preferences, interactions, and history
+- Optimistic UI updates for better perceived performance
+- Real-time notifications via Supabase subscriptions
+- Efficient caching strategy to minimize API calls
+- Progressive enhancement: core features work offline, enhanced features require connectivity
+
+---
+
+## Conceptual Architecture
+
+### System Layers
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    FRONTEND (Next.js)                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │   UI Layer   │  │  State Mgmt  │  │  API Client  │      │
+│  │  Components  │  │  (React)     │  │  (Fetch)     │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│         │                  │                  │             │
+│         └──────────────────┼──────────────────┘             │
+│                            │                                │
+└────────────────────────────┼────────────────────────────────┘
+                             │
+                ┌────────────┴────────────┐
+                │                         │
+        ┌───────▼────────┐      ┌────────▼──────────┐
+        │  Supabase Auth │      │  Backend API      │
+        │  (Google OAuth)│      │  (Express)        │
+        └───────┬────────┘      └────────┬──────────┘
+                │                        │
+                └────────────┬───────────┘
+                             │
+                    ┌────────▼──────────┐
+                    │   Supabase DB     │
+                    │  (PostgreSQL)     │
+                    │  + RLS Policies   │
+                    └───────────────────┘
+```
+
+### Data Domain Model
+
+```
+User (auth.users)
+│
+├── UserProfiles (1:1)
+│   └── Basic identity, contact, avatar
+│
+├── UserBuyerPreferences (1:1)
+│   └── Purchase intent, timeline, status
+│
+├── UserLikedProperties (1:many)
+│   └── Quick likes/hearts (lightweight)
+│
+├── UserSavedListings (1:many)
+│   └── Saved with notes/tags (heavyweight)
+│
+├── UserViewingHistory (1:many)
+│   └── Analytics and recommendations
+│
+├── UserSavedSearches (1:many)
+│   └── Search criteria + alert settings
+│
+└── UserNotifications (1:many)
+    └── System-generated alerts
+```
+
+### Key Relationships
+
+- **Likes vs Saved Listings**: Likes are quick, ephemeral interactions. Saved listings are intentional collections with metadata.
+- **Viewing History**: Automatic tracking for analytics and "recently viewed" features.
+- **Saved Searches**: Drive notification generation when new properties match criteria.
+- **Notifications**: Generated by backend processes (price changes, new matches, open houses).
+
+---
+
+## Authentication Flow
+
+### Initial Authentication
+
+**Flow:**
+1. User clicks "Sign in with Google"
+2. Frontend redirects to Supabase Auth Google provider
+3. Google OAuth completes → Supabase creates `auth.users` record
+4. **Critical**: Backend webhook/trigger creates `UserProfiles` record automatically
+5. Frontend receives session token
+6. Frontend checks if profile exists → if not, redirects to onboarding
+
+### Session Management
+
+**Frontend:**
+- Use Supabase client with `persistSession: true`
+- Store session in localStorage (handled by Supabase SDK)
+- Auto-refresh tokens via Supabase SDK
+- Listen to auth state changes: `supabase.auth.onAuthStateChange()`
+
+**Backend:**
+- Extract JWT from `Authorization: Bearer <token>` header
+- Verify token with Supabase Admin API
+- Extract `userId` from token claims
+- Use for RLS context and user-scoped queries
+
+### Authentication States
+
+```typescript
+type AuthState = 
+  | { status: 'loading' }
+  | { status: 'unauthenticated' }
+  | { status: 'authenticated', user: User, profile: UserProfile | null }
+  | { status: 'onboarding_required', user: User }
+```
+
+### Profile Creation Trigger
+
+**Database Trigger (PostgreSQL):**
+```sql
+-- Auto-create UserProfiles when auth.users record is created
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public."UserProfiles" ("Id", "Email", "FirstName", "LastName", "AvatarUrl")
+  VALUES (
+    NEW.id,
+    NEW.email,
+    NEW.raw_user_meta_data->>'first_name',
+    NEW.raw_user_meta_data->>'last_name',
+    NEW.raw_user_meta_data->>'avatar_url'
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+```
+
+**Why this approach:**
+- Ensures profile always exists after auth
+- Prevents race conditions
+- Centralizes profile creation logic
+- Can be extended to set default preferences
+
+---
+
+## Onboarding Strategy
+
+### Onboarding Detection
+
+**Frontend Logic:**
+```typescript
+// After successful auth
+const profile = await getUserProfile(userId);
+if (!profile.FirstName || !profile.Phone) {
+  // Redirect to onboarding
+}
+// OR check if preferences exist
+const prefs = await getUserPreferences(userId);
+if (!prefs) {
+  // Redirect to preferences onboarding
+}
+```
+
+### Onboarding Flow
+
+**Step 1: Profile Completion (Optional)**
+- First name, last name, phone number
+- Avatar upload (optional)
+- Can skip, but recommended
+
+**Step 2: Buyer Preferences (Required for core features)**
+- First-time buyer? (boolean)
+- Pre-approved? (boolean)
+- Has house to sell? (boolean)
+- Purchase timeframe: '0-3', '3-6', '6-12', '12+' months
+
+**Step 3: Initial Search Setup (Optional)**
+- Prompt to create first saved search
+- Pre-fill with location based on IP/geolocation
+- Can skip and do later
+
+### Onboarding UX
+
+- **Progressive**: Allow skipping steps, but track completion
+- **Contextual**: Show onboarding only when needed
+- **Non-blocking**: User can access app, but certain features require completion
+- **Re-engagement**: Show "Complete your profile" banner if incomplete
+
+### Onboarding State Management
+
+```typescript
+type OnboardingStatus = {
+  profileComplete: boolean;
+  preferencesComplete: boolean;
+  firstSearchCreated: boolean;
+  completedAt: Date | null;
+};
+```
+
+---
+
+## Backend Architecture
+
+### Project Structure
+
+```
+BACKEND_API/
+├── routes/
+│   ├── auth.js              # Auth helpers, token verification
+│   ├── users.js             # User profile CRUD
+│   ├── preferences.js       # Buyer preferences
+│   ├── likes.js             # Liked properties
+│   ├── saved-listings.js    # Saved listings with notes/tags
+│   ├── viewing-history.js   # View tracking
+│   ├── saved-searches.js    # Search management
+│   ├── notifications.js     # Notification CRUD
+│   └── properties.js        # (existing)
+├── services/
+│   ├── authService.js       # Supabase auth verification
+│   ├── userService.js       # User domain logic
+│   ├── notificationService.js  # Notification generation
+│   └── searchAlertService.js   # Saved search execution
+├── middleware/
+│   ├── auth.js              # JWT verification middleware
+│   └── validation.js        # Request validation
+├── utils/
+│   ├── supabaseAdmin.js     # Admin client for server-side ops
+│   └── errors.js            # (existing)
+└── jobs/
+    └── searchAlerts.js       # Background job for search alerts
+```
+
+### Authentication Middleware
+
+```javascript
+// middleware/auth.js
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+export async function verifyAuth(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
   }
-  ```
-- Notes:
-  - Only listing suggestions return from backend; **location suggestions remain client-owned taxonomy** refreshed in the frontend bundle.
-  - Listing suggestion entries are the slimmed `PropertyCardResponse` subset: identity, location, list price, reduction stats, `bedroomsAboveGrade`, `bedroomsBelowGrade`, `bathroomsTotalInteger`, `livingAreaMin`, `livingAreaMax`, `propertySubType`, and `primaryImageUrl`.
 
-#### 4.4 `MapPopupPropertyResponse`
-| Field | Description | Source |
-| --- | --- | --- |
-| `listingKey`, `status`, `propertySubType` | Identify listing and label tag | `PropertyCardView` |
-| `fullAddress`, `city`, `stateOrProvince` | Display-split address lines | `PropertyCardView` |
-| `coordinates` `{ latitude, longitude }` | Map placement | `PropertyCardView` |
-| `primaryImageUrl` / `images[0]` | Hero thumbnail | `Media` |
-| `listPrice`, `listedAt` (`originalEntryTimestamp`), `status` | Pricing + timeline | `PropertyCardView` |
-| Quick Metrics | `bedroomsDisplay`, fallback `bedroomsAboveGrade + bedroomsBelowGrade`, `bathroomsDisplay`, `parkingTotal`, `coveredSpaces`, `parkingSpaces`, `livingAreaMin`, `livingAreaMax` | `PropertyCardView` |
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    
+    if (error || !user) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
 
-### 5. Backend Composition Flow
-1. **Search/List/Map Requests**
-   - Query `PropertyCardView` with validated filters; enforce view-only access.
-   - Hydrate `primaryImageUrl`, `mediaCount`, and hero carousel arrays via `Media` table joins or cached lookup.
-   - Derive `garageSpaces` from `coveredSpaces` when missing; include optional media metadata when stored.
-2. **Property Detail Requests**
-   - Fetch base record from `PropertyDetailsView` by `ListingKey`.
-   - Parallel fetches:
-     - `RoomDetailsView` for `rooms[]`.
-     - `Media` for gallery assets (include `order`, `caption`, `dimensions` if stored).
-     - Analytics service for optional day-level metrics.
-     - Agent CRM for contact + performance data (fallback to placeholder object when unavailable).
-     - AI summary service for marketing content; omit when service fails.
-   - Compose into `PropertyDetailsResponse`, ensuring frontend field casing.
-3. **Caching & Versioning**
-   - Vary cache keys by filter signature + page for `PropertyCardResponse`.
-   - For details, short-lived cache (e.g., 5 minutes) to keep price reductions timely.
-   - Include `schemaVersion` metadata if future breaking changes expected.
+    req.user = user;
+    req.userId = user.id;
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'Token verification failed' });
+  }
+}
+```
 
-### 6. Validation & Formatting Rules
-- **Addresses:** Always emit `fullAddress`. Street components only for detail payload.
-- **Bedrooms/Bathrooms:** Use `BedroomsDisplay`/`BathroomsDisplay` for UI labels; `BedroomsTotal` is deprecated and must never be surfaced.
-- **Open Houses:** Provide `openHouseDisplay` string; if precise schedule arrays are added later, keep this field for backwards compatibility.
-- **Price Reductions:** Use formatted `PriceReductionAmount` string and numeric `PriceReductionPercent`; `isPriceReduced` toggles card badge.
-- **Lot Measurements:** Maintain both numeric and unit fields. Do not compute derived square footage on the fly.
-- **Media Ordering:** Respect `PreferredPhotoYN` then `Order`. Always include `primaryImageUrl` even when gallery empty (fallback placeholder URL).
-- **Optional Blocks:** When optional services (analytics, agent, AI) fail, return `null` for their respective objects so FE can hide modules without guesswork.
+### Service Layer Pattern
 
-### 7. Open Questions / Future Enhancements
-- Will we persist media `caption` and `dimensions` in the `Media` table or a companion metadata store? (Currently optional; roadmap item.)
-- Confirm timing for CRM integration so backend can remove placeholder agent mocks.
-- Determine whether day-level analytics will be added to `PropertyDetailsView` materialization or fetched live per request.
-- Decide if backend will eventually own the location taxonomy to keep FE bundle slimmer; if yes, define ingestion pipeline for weekly updates.
+**Example: User Service**
+```javascript
+// services/userService.js
+import { supabaseAdmin } from '../utils/supabaseAdmin.js';
 
-### 8. Next Steps
-- Backend to implement response mappers conforming to the above payloads and share sample JSON fixtures with frontend for validation.
-- Frontend to verify naming alignment (`PropertyCardResponse`, etc.) and highlight any additional optional fields needed before release.
-- Once both sides approve, document becomes binding interface reference for future releases; subsequent changes require versioning callouts in this file.
+export class UserService {
+  async getProfile(userId) {
+    const { data, error } = await supabaseAdmin
+      .from('UserProfiles')
+      .select('*')
+      .eq('Id', userId)
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
 
+  async updateProfile(userId, updates) {
+    // Validation, business logic, then update
+    const { data, error } = await supabaseAdmin
+      .from('UserProfiles')
+      .update({ ...updates, UpdatedAt: new Date().toISOString() })
+      .eq('Id', userId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
+
+  async updateLastLogin(userId) {
+    // Called on every authenticated request
+    await supabaseAdmin
+      .from('UserProfiles')
+      .update({ LastLoginAt: new Date().toISOString() })
+      .eq('Id', userId);
+  }
+}
+```
+
+### Background Jobs
+
+**Search Alert Execution:**
+- Scheduled job (cron or queue-based)
+- Runs every hour (or configurable)
+- For each active saved search:
+  - Execute search with filters
+  - Compare with `LastRunAt` results
+  - Generate notifications for new matches
+  - Update `LastRunAt`, `NewResultsCount`
+  - Respect `AlertFrequency` (instant/daily/weekly/never)
+
+**Notification Generation:**
+- Price change detection (compare current vs previous price)
+- Status change detection (active → sold, etc.)
+- Open house reminders (24h before event)
+- System notifications (maintenance, features)
+
+---
+
+## Frontend Architecture
+
+### Project Structure
+
+```
+FRONTEND_API/
+├── app/
+│   ├── (auth)/
+│   │   ├── login/
+│   │   └── onboarding/
+│   ├── (dashboard)/
+│   │   ├── profile/
+│   │   ├── saved/
+│   │   ├── searches/
+│   │   └── notifications/
+│   └── api/              # Next.js API routes (if needed)
+├── components/
+│   ├── auth/
+│   ├── user/
+│   ├── properties/
+│   └── notifications/
+├── hooks/
+│   ├── useAuth.ts
+│   ├── useUserProfile.ts
+│   ├── usePreferences.ts
+│   ├── useLikes.ts
+│   ├── useSavedListings.ts
+│   ├── useViewingHistory.ts
+│   ├── useSavedSearches.ts
+│   └── useNotifications.ts
+├── lib/
+│   ├── api/
+│   │   ├── users.ts
+│   │   ├── preferences.ts
+│   │   ├── likes.ts
+│   │   ├── saved-listings.ts
+│   │   ├── viewing-history.ts
+│   │   ├── saved-searches.ts
+│   │   └── notifications.ts
+│   ├── supabaseClient.ts  # (existing)
+│   └── cache.ts           # Client-side cache utilities
+└── types/
+    └── user.ts            # User domain types
+```
+
+### State Management Strategy
+
+**Approach: React Query (TanStack Query) + Context**
+
+**Why React Query:**
+- Automatic caching, refetching, background updates
+- Optimistic updates built-in
+- Request deduplication
+- Perfect for server state
+
+**Context for:**
+- Auth state (global, changes infrequently)
+- UI state (modals, sidebars)
+- Client-side preferences (theme, etc.)
+
+### Custom Hooks Pattern
+
+**Example: useLikes**
+```typescript
+// hooks/useLikes.ts
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { likeProperty, unlikeProperty, getLikedProperties } from '@/lib/api/likes';
+
+export function useLikes() {
+  const queryClient = useQueryClient();
+  
+  const { data: likes = [], isLoading } = useQuery({
+    queryKey: ['likes'],
+    queryFn: getLikedProperties,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+
+  const likeMutation = useMutation({
+    mutationFn: likeProperty,
+    onMutate: async (mlsNumber) => {
+      // Optimistic update
+      await queryClient.cancelQueries({ queryKey: ['likes'] });
+      const previous = queryClient.getQueryData(['likes']);
+      queryClient.setQueryData(['likes'], (old: string[]) => [...old, mlsNumber]);
+      return { previous };
+    },
+    onError: (err, mlsNumber, context) => {
+      // Rollback on error
+      queryClient.setQueryData(['likes'], context.previous);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['likes'] });
+    },
+  });
+
+  return {
+    likes,
+    isLoading,
+    isLiked: (mlsNumber: string) => likes.includes(mlsNumber),
+    like: likeMutation.mutate,
+    unlike: unlikeMutation.mutate,
+  };
+}
+```
+
+### API Client Structure
+
+**Pattern: Service-based API clients**
+```typescript
+// lib/api/likes.ts
+import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
+import { BACKEND_API_URL } from '@/lib/constants';
+
+export async function getLikedProperties(): Promise<string[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) throw new Error('Not authenticated');
+
+  const { data, error } = await supabase
+    .from('UserLikedProperties')
+    .select('MlsNumber')
+    .order('LikedAt', { ascending: false });
+
+  if (error) throw error;
+  return data.map(row => row.MlsNumber);
+}
+
+export async function likeProperty(mlsNumber: string): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) throw new Error('Not authenticated');
+
+  const { error } = await supabase
+    .from('UserLikedProperties')
+    .insert({ MlsNumber: mlsNumber });
+
+  if (error) throw error;
+}
+
+// For operations that need backend logic, use backend API
+export async function bulkLikeProperties(mlsNumbers: string[]): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  const response = await fetch(`${BACKEND_API_URL}/api/likes/bulk`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session?.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ mlsNumbers }),
+  });
+
+  if (!response.ok) throw new Error('Failed to like properties');
+}
+```
+
+**Decision Matrix: Supabase Direct vs Backend API**
+
+| Operation | Use Supabase Direct | Use Backend API |
+|-----------|-------------------|-----------------|
+| Simple CRUD (likes, saved listings) | ✅ | ❌ |
+| Complex validation | ❌ | ✅ |
+| Background processing | ❌ | ✅ |
+| Bulk operations | ❌ | ✅ |
+| Real-time subscriptions | ✅ | ❌ |
+| Notification generation | ❌ | ✅ |
+
+---
+
+## API Endpoints Specification
+
+### Base URL
+- **Backend**: `https://your-backend.railway.app/api`
+- **Supabase**: Direct client calls (no explicit base URL)
+
+### Authentication
+All backend endpoints require:
+```
+Authorization: Bearer <supabase_jwt_token>
+```
+
+### Endpoint Catalog
+
+#### User Profile
+
+**GET `/api/users/profile`**
+- Returns: `UserProfile`
+- Auth: Required
+- Cache: 5 minutes
+
+**PUT `/api/users/profile`**
+- Body: `{ FirstName?, LastName?, Phone?, AvatarUrl? }`
+- Returns: `UserProfile`
+- Validation: Email cannot be changed
+
+**GET `/api/users/onboarding-status`**
+- Returns: `OnboardingStatus`
+- Determines if user needs onboarding
+
+#### Buyer Preferences
+
+**GET `/api/users/preferences`**
+- Returns: `UserBuyerPreferences | null`
+- Auth: Required
+
+**PUT `/api/users/preferences`**
+- Body: `{ FirstTimeBuyer?, PreApproved?, HasHouseToSell?, PurchaseTimeframe? }`
+- Returns: `UserBuyerPreferences`
+- Creates if doesn't exist (upsert)
+
+#### Liked Properties
+
+**GET `/api/likes`**
+- Returns: `{ mlsNumbers: string[] }`
+- Auth: Required
+- Cache: 2 minutes
+
+**POST `/api/likes`**
+- Body: `{ mlsNumber: string }`
+- Returns: `{ success: boolean }`
+- Idempotent: No error if already liked
+
+**DELETE `/api/likes/:mlsNumber`**
+- Returns: `{ success: boolean }`
+- Idempotent: No error if not liked
+
+**POST `/api/likes/bulk`**
+- Body: `{ mlsNumbers: string[] }`
+- Returns: `{ success: boolean, count: number }`
+- For initial sync or bulk operations
+
+#### Saved Listings
+
+**GET `/api/saved-listings`**
+- Query: `?page=1&limit=20&tag=?`
+- Returns: `{ listings: SavedListing[], total: number }`
+- Includes joined property data from PropertyDetailsView
+
+**POST `/api/saved-listings`**
+- Body: `{ mlsNumber: string, Notes?: string, Tags?: string[] }`
+- Returns: `SavedListing`
+- Auto-creates if not exists, updates if exists
+
+**PUT `/api/saved-listings/:id`**
+- Body: `{ Notes?, Tags? }`
+- Returns: `SavedListing`
+
+**DELETE `/api/saved-listings/:id`**
+- Returns: `{ success: boolean }`
+
+**GET `/api/saved-listings/tags`**
+- Returns: `{ tags: string[] }`
+- All unique tags for user
+
+#### Viewing History
+
+**POST `/api/viewing-history/track`**
+- Body: `{ mlsNumber: string }`
+- Returns: `{ success: boolean }`
+- Idempotent: Increments ViewCount if exists, creates if not
+- Called automatically on property detail page view
+
+**GET `/api/viewing-history`**
+- Query: `?limit=20&offset=0`
+- Returns: `{ history: ViewingHistoryEntry[], total: number }`
+- Ordered by LastViewedAt DESC
+
+**DELETE `/api/viewing-history/:id`**
+- Returns: `{ success: boolean }`
+- Clear individual entry
+
+**DELETE `/api/viewing-history/clear`**
+- Returns: `{ success: boolean }`
+- Clear all history
+
+#### Saved Searches
+
+**GET `/api/saved-searches`**
+- Returns: `SavedSearch[]`
+- Auth: Required
+
+**POST `/api/saved-searches`**
+- Body: `{ Name: string, Filters: object, AlertsEnabled?: boolean, AlertFrequency?: string }`
+- Returns: `SavedSearch`
+- Validation: Filters must match property search schema
+
+**PUT `/api/saved-searches/:id`**
+- Body: `{ Name?, Filters?, AlertsEnabled?, AlertFrequency? }`
+- Returns: `SavedSearch`
+
+**DELETE `/api/saved-searches/:id`**
+- Returns: `{ success: boolean }`
+
+**POST `/api/saved-searches/:id/run`**
+- Returns: `{ results: PropertyCardView[], count: number }`
+- Manually execute search (for testing/preview)
+
+**GET `/api/saved-searches/:id/stats`**
+- Returns: `{ totalResults: number, newResults: number, lastRunAt: Date | null }`
+
+#### Notifications
+
+**GET `/api/notifications`**
+- Query: `?unreadOnly=true&limit=20&offset=0`
+- Returns: `{ notifications: Notification[], unreadCount: number, total: number }`
+- Ordered by CreatedAt DESC
+
+**PUT `/api/notifications/:id/read`**
+- Returns: `{ success: boolean }`
+- Marks as read, sets ReadAt
+
+**PUT `/api/notifications/read-all`**
+- Returns: `{ success: boolean, count: number }`
+- Marks all user notifications as read
+
+**DELETE `/api/notifications/:id`**
+- Returns: `{ success: boolean }`
+
+**GET `/api/notifications/unread-count`**
+- Returns: `{ count: number }`
+- Lightweight endpoint for badge updates
+- Cache: 30 seconds
+
+---
+
+## Data Flow & State Management
+
+### Data Flow Diagram
+
+```
+User Action (e.g., Like Property)
+    │
+    ├─→ Optimistic Update (React Query)
+    │   └─→ UI updates immediately
+    │
+    ├─→ API Call (Supabase Direct or Backend)
+    │   └─→ Database write
+    │
+    ├─→ Success: Invalidate cache, refetch
+    │   └─→ UI syncs with server state
+    │
+    └─→ Error: Rollback optimistic update
+        └─→ Show error message
+```
+
+### State Synchronization
+
+**Strategy: Optimistic Updates + Background Sync**
+
+1. **Optimistic Updates**: All mutations update UI immediately
+2. **Background Refetch**: React Query refetches in background
+3. **Real-time Sync**: Supabase subscriptions for critical data (notifications)
+4. **Conflict Resolution**: Server state wins (last-write-wins for simple cases)
+
+### Cache Strategy
+
+**React Query Cache Keys:**
+```typescript
+['likes']                           // All liked MLS numbers
+['saved-listings']                  // All saved listings
+['saved-listings', { tag: 'x' }]   // Filtered by tag
+['saved-searches']                  // All saved searches
+['notifications']                   // All notifications
+['notifications', 'unread']         // Unread only
+['user-profile']                    // User profile
+['user-preferences']                // Buyer preferences
+['viewing-history']                 // Viewing history
+```
+
+**Stale Time:**
+- User profile: 5 minutes
+- Preferences: 10 minutes
+- Likes: 2 minutes
+- Saved listings: 3 minutes
+- Saved searches: 5 minutes
+- Notifications: 30 seconds (real-time via subscription)
+- Viewing history: 1 minute
+
+**Cache Invalidation:**
+- On mutation success: Invalidate related queries
+- On real-time event: Invalidate specific query
+- On auth state change: Clear all user-specific queries
+
+---
+
+## User Flows
+
+### Flow 1: First-Time User Authentication
+
+```
+1. User lands on homepage
+2. Clicks "Sign in with Google"
+3. Google OAuth flow
+4. Supabase creates auth.users record
+5. Database trigger creates UserProfiles record
+6. Frontend receives session
+7. Check onboarding status
+8. If incomplete → Redirect to onboarding
+9. If complete → Redirect to dashboard
+```
+
+### Flow 2: Property Interaction (Like → Save → Notes)
+
+```
+1. User browses properties
+2. Clicks heart icon (like)
+   └─→ Optimistic update
+   └─→ API call to create UserLikedProperties record
+3. User views property details
+   └─→ Auto-track in UserViewingHistory
+4. User clicks "Save" button
+   └─→ Creates UserSavedListings record
+   └─→ Optionally copies from UserLikedProperties (or keeps both)
+5. User adds notes/tags to saved listing
+   └─→ Updates UserSavedListings record
+```
+
+### Flow 3: Saved Search & Alerts
+
+```
+1. User performs property search
+2. User clicks "Save Search"
+3. Frontend prompts for name, alert settings
+4. Creates UserSavedSearches record
+5. Backend job (hourly) executes saved searches
+6. For each new match:
+   └─→ Creates UserNotifications record
+   └─→ Updates NewResultsCount
+7. Frontend receives real-time notification
+8. User clicks notification
+   └─→ Navigates to search results
+   └─→ Marks notification as read
+```
+
+### Flow 4: Notification Lifecycle
+
+```
+1. Backend generates notification (price change, new match, etc.)
+2. Creates UserNotifications record
+3. Supabase real-time subscription fires on frontend
+4. Frontend updates notification badge
+5. User opens notifications panel
+   └─→ Fetches unread notifications
+6. User clicks notification
+   └─→ Marks as read
+   └─→ Navigates to relevant page
+7. User can delete or mark all as read
+```
+
+### Flow 5: Profile & Preferences Update
+
+```
+1. User navigates to profile settings
+2. Frontend loads current profile/preferences
+3. User edits fields
+4. User clicks "Save"
+   └─→ Optimistic update
+   └─→ API call to update
+5. Success: Cache invalidated, UI updates
+6. If preferences changed:
+   └─→ May trigger re-evaluation of saved searches
+   └─→ May update recommendation engine inputs
+```
+
+### Flow 6: Viewing History & Recommendations
+
+```
+1. User views property detail page
+2. Frontend automatically calls POST /api/viewing-history/track
+3. Backend upserts UserViewingHistory (increments ViewCount)
+4. User navigates to "Recently Viewed"
+   └─→ Fetches viewing history
+   └─→ Joins with PropertyDetailsView for full data
+5. System can use viewing history for:
+   └─→ "You may also like" recommendations
+   └─→ Analytics on user interests
+   └─→ Re-engagement ("You viewed this 3 times")
+```
+
+---
+
+## Caching & Performance Strategy
+
+### Frontend Caching
+
+**React Query Configuration:**
+```typescript
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 2 * 60 * 1000, // 2 minutes
+      cacheTime: 10 * 60 * 1000, // 10 minutes
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+    },
+  },
+});
+```
+
+**Local Storage Cache:**
+- Store user preferences (theme, UI state)
+- Store last search filters (for "Continue searching")
+- **Do NOT** store sensitive data or tokens (Supabase handles this)
+
+### Backend Caching
+
+**Response Caching (if needed):**
+- Cache user profile lookups (Redis or in-memory)
+- Cache notification counts (30s TTL)
+- **Do NOT** cache user-specific mutable data aggressively
+
+### Database Query Optimization
+
+**Indexes (already in schema):**
+- All foreign keys indexed
+- Composite indexes for common queries
+- Partial indexes for filtered queries (e.g., unread notifications)
+
+**Query Patterns:**
+- Use `select()` to limit columns
+- Use pagination for list endpoints
+- Use `single()` for unique lookups
+- Batch operations where possible (bulk likes, etc.)
+
+### Performance Targets
+
+- **API Response Time**: < 200ms for simple queries, < 500ms for complex
+- **Time to Interactive**: < 2s on 3G
+- **Optimistic Update Latency**: < 50ms perceived
+- **Real-time Notification Delivery**: < 1s from backend event
+
+---
+
+## Real-time Features
+
+### Supabase Realtime Subscriptions
+
+**Notifications Subscription:**
+```typescript
+// hooks/useNotifications.ts
+useEffect(() => {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return;
+
+  const channel = supabase
+    .channel('user-notifications')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'UserNotifications',
+        filter: `UserId=eq.${userId}`,
+      },
+      (payload) => {
+        // New notification received
+        queryClient.setQueryData(['notifications'], (old) => {
+          return [payload.new, ...(old || [])];
+        });
+        queryClient.invalidateQueries(['notifications', 'unread']);
+        // Show toast notification
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [userId]);
+```
+
+**Real-time Use Cases:**
+1. **Notifications**: Instant delivery when created
+2. **Saved Search Updates**: When NewResultsCount changes
+3. **Profile Updates**: If updated from another device (optional)
+
+**RLS Policies for Realtime:**
+```sql
+-- Ensure users can only subscribe to their own notifications
+ALTER TABLE "UserNotifications" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own notifications"
+  ON "UserNotifications"
+  FOR SELECT
+  USING (auth.uid() = "UserId");
+```
+
+---
+
+## Error Handling & Edge Cases
+
+### Error Categories
+
+**1. Authentication Errors**
+- Token expired → Refresh token automatically
+- Invalid token → Redirect to login
+- No session → Show login prompt
+
+**2. Network Errors**
+- Request timeout → Retry with exponential backoff
+- Offline → Queue mutations, sync when online
+- Rate limit → Show user-friendly message
+
+**3. Validation Errors**
+- Invalid input → Show field-level errors
+- Constraint violation → Show specific message
+- Missing required fields → Highlight in UI
+
+**4. Business Logic Errors**
+- Duplicate like → Ignore (idempotent)
+- Property not found → Show "Property no longer available"
+- Search no results → Show empty state
+
+### Edge Cases
+
+**1. Concurrent Updates**
+- User likes property on two devices simultaneously
+- Solution: Last write wins (acceptable for likes)
+- For critical data: Use optimistic locking (version field)
+
+**2. Orphaned Data**
+- Property deleted but exists in UserLikedProperties
+- Solution: Show "Property no longer available" placeholder
+- Or: Cleanup job to remove orphaned references
+
+**3. Notification Delivery**
+- User offline when notification created
+- Solution: Fetch on reconnect, show in notification center
+- Badge count updates on app open
+
+**4. Saved Search Execution**
+- Search filters reference deleted/renamed fields
+- Solution: Validate filters on save, handle gracefully on execution
+- Log errors, notify user if search fails
+
+**5. Profile Sync**
+- User updates profile on web, then mobile
+- Solution: Last write wins, or show conflict resolution UI
+- Real-time subscription can help keep clients in sync
+
+---
+
+## Security Considerations
+
+### Row Level Security (RLS)
+
+**All user tables must have RLS enabled:**
+
+```sql
+-- Example: UserLikedProperties
+ALTER TABLE "UserLikedProperties" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own likes"
+  ON "UserLikedProperties"
+  FOR SELECT
+  USING (auth.uid() = "UserId");
+
+CREATE POLICY "Users can insert own likes"
+  ON "UserLikedProperties"
+  FOR INSERT
+  WITH CHECK (auth.uid() = "UserId");
+
+CREATE POLICY "Users can delete own likes"
+  ON "UserLikedProperties"
+  FOR DELETE
+  USING (auth.uid() = "UserId");
+```
+
+**Apply similar policies to all user tables.**
+
+### API Security
+
+**Backend:**
+- Verify JWT on every request
+- Never trust client-provided UserId (extract from token)
+- Validate all inputs (use Zod or similar)
+- Rate limiting (already implemented)
+- CORS configuration (only allow frontend domain)
+
+**Frontend:**
+- Never store tokens manually (Supabase SDK handles this)
+- Sanitize user inputs before sending
+- Validate responses before rendering
+- Use HTTPS only
+
+### Data Privacy
+
+- **User data**: Only accessible by the user (RLS)
+- **Analytics**: Anonymize viewing history if needed
+- **Deletion**: Cascade delete ensures no orphaned data
+- **Export**: Provide user data export (GDPR compliance)
+
+---
+
+## Implementation Phases
+
+### Phase 1: Foundation (Week 1)
+- [ ] Set up authentication middleware in backend
+- [ ] Create user profile API endpoints
+- [ ] Implement onboarding detection logic
+- [ ] Set up database triggers for profile creation
+- [ ] Create frontend auth context/hooks
+- [ ] Build login/onboarding UI
+
+### Phase 2: Core Interactions (Week 2)
+- [ ] Implement likes API (backend + frontend)
+- [ ] Implement saved listings API
+- [ ] Implement viewing history tracking
+- [ ] Build property interaction UI (like, save buttons)
+- [ ] Create "My Saved Listings" page
+- [ ] Add optimistic updates
+
+### Phase 3: Preferences & Profile (Week 3)
+- [ ] Implement buyer preferences API
+- [ ] Build preferences UI
+- [ ] Implement profile update API
+- [ ] Build profile settings page
+- [ ] Add avatar upload functionality
+
+### Phase 4: Saved Searches (Week 4)
+- [ ] Implement saved searches API
+- [ ] Build saved search management UI
+- [ ] Create search alert background job
+- [ ] Implement search execution logic
+- [ ] Add "Save Search" functionality to search page
+
+### Phase 5: Notifications (Week 5)
+- [ ] Implement notifications API
+- [ ] Set up real-time subscriptions
+- [ ] Build notification center UI
+- [ ] Implement notification generation logic
+- [ ] Add notification badges
+- [ ] Create notification types (price change, new match, etc.)
+
+### Phase 6: Polish & Optimization (Week 6)
+- [ ] Add error handling and edge cases
+- [ ] Implement caching strategy
+- [ ] Performance optimization
+- [ ] Add analytics tracking
+- [ ] Write tests (unit + integration)
+- [ ] Documentation
+
+---
+
+## Additional Recommendations
+
+### Analytics & Insights
+
+**Track:**
+- Property views (already in UserViewingHistory)
+- Search patterns (log saved search executions)
+- Engagement metrics (likes per user, saves per user)
+- Conversion funnel (view → like → save → contact)
+
+**Use for:**
+- Recommendation engine
+- Personalization
+- Product improvements
+
+### Feature Enhancements
+
+**Future Considerations:**
+1. **Property Comparisons**: Allow users to compare saved listings side-by-side
+2. **Share Lists**: Share saved listing collections with others
+3. **Collaborative Searches**: Multiple users contribute to a saved search
+4. **Smart Recommendations**: ML-based property recommendations
+5. **Export Data**: Allow users to export their data (CSV, PDF)
+6. **Mobile App**: Native mobile apps with push notifications
+
+### Testing Strategy
+
+**Unit Tests:**
+- Service layer logic
+- Validation functions
+- Utility functions
+
+**Integration Tests:**
+- API endpoints (with test database)
+- Database triggers
+- Background jobs
+
+**E2E Tests:**
+- Critical user flows (auth, save property, create search)
+- Cross-browser testing
+- Mobile responsiveness
+
+---
+
+## Conclusion
+
+This architecture provides:
+
+✅ **Separation of Concerns**: Backend handles business logic, frontend handles UX
+✅ **Scalability**: Can handle growth in users and data
+✅ **Performance**: Optimistic updates, caching, efficient queries
+✅ **User Experience**: Real-time updates, smooth interactions
+✅ **Security**: RLS, JWT verification, input validation
+✅ **Maintainability**: Clear structure, service layer pattern, type safety
+
+The design balances:
+- **Simplicity**: Direct Supabase calls for simple CRUD
+- **Flexibility**: Backend API for complex operations
+- **Real-time**: Supabase subscriptions for instant updates
+- **Reliability**: Error handling, optimistic updates, conflict resolution
+
+**Next Steps:**
+1. Review and approve this plan
+2. Set up development environment
+3. Begin Phase 1 implementation
+4. Iterate based on feedback
+
+---
+
+*Document Version: 1.0*  
+*Last Updated: [Current Date]*

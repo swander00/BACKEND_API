@@ -8,6 +8,12 @@ import { parseArgs } from './utils/args.js';
 import propertiesRouter from './routes/properties.js';
 import searchRouter from './routes/search.js';
 import mediaRouter from './routes/media.js';
+import usersRouter from './routes/users.js';
+import likesRouter from './routes/likes.js';
+import savedListingsRouter from './routes/saved-listings.js';
+import viewingHistoryRouter from './routes/viewing-history.js';
+import savedSearchesRouter from './routes/saved-searches.js';
+import notificationsRouter from './routes/notifications.js';
 import { rateLimit } from './utils/rateLimit.js';
 import { clearCache } from './utils/cache.js';
 import { spawn } from 'child_process';
@@ -216,6 +222,12 @@ app.post('/trigger-sync', async (req, res) => {
 app.use('/api/properties', propertiesRouter);
 app.use('/api/search', searchRouter);
 app.use('/api/media', mediaRouter);
+app.use('/api/users', usersRouter);
+app.use('/api/likes', likesRouter);
+app.use('/api/saved-listings', savedListingsRouter);
+app.use('/api/viewing-history', viewingHistoryRouter);
+app.use('/api/saved-searches', savedSearchesRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // [1.5] Admin - Cache Bust (requires ADMIN_TOKEN header match)
 app.post('/admin/cache-bust', (req, res, next) => {
