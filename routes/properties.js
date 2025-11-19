@@ -827,7 +827,7 @@ function mapToMapPopupResponse(record) {
 // Validation functions moved to utils/validation.js
 
 function sanitizeSortBy(value) {
-  const allowed = new Set(['newest','oldest','price_asc','price_desc','sqft_asc','sqft_desc']);
+  const allowed = new Set(['newest','oldest','price_asc','price_desc','beds_desc','sqft_asc','sqft_desc']);
   return allowed.has(value) ? value : 'newest';
 }
 

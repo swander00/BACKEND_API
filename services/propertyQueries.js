@@ -495,19 +495,29 @@ function applyMapBounds(query, bounds) {
 function applySorting(query, sortBy) {
   switch (sortBy) {
     case 'newest':
-      return query.order('OriginalEntryTimestamp', { ascending: false });
+      // Use raw timestamp field for proper chronological sorting (newest listings first)
+      return query.order('OriginalEntryTimestampRaw', { ascending: false });
     case 'oldest':
-      return query.order('OriginalEntryTimestamp', { ascending: true });
+      // Use raw timestamp field for proper chronological sorting (oldest listings first)
+      return query.order('OriginalEntryTimestampRaw', { ascending: true });
     case 'price_asc':
-      return query.order('ListPrice', { ascending: true });
+      // Use raw numeric field for proper numeric sorting (lowest price first)
+      return query.order('ListPriceRaw', { ascending: true });
     case 'price_desc':
-      return query.order('ListPrice', { ascending: false });
+      // Use raw numeric field for proper numeric sorting (highest price first)
+      return query.order('ListPriceRaw', { ascending: false });
+    case 'beds_desc':
+      // Sort by bedrooms descending (most bedrooms first)
+      return query.order('BedroomsAboveGrade', { ascending: false });
     case 'sqft_asc':
+      // Sort by square footage ascending (smallest first)
       return query.order('LivingAreaMin', { ascending: true });
     case 'sqft_desc':
+      // Sort by square footage descending (largest first)
       return query.order('LivingAreaMax', { ascending: false });
     default:
-      return query.order('OriginalEntryTimestamp', { ascending: false });
+      // Use raw timestamp field for proper chronological sorting (newest listings first)
+      return query.order('OriginalEntryTimestampRaw', { ascending: false });
   }
 }
 

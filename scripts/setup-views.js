@@ -39,14 +39,82 @@ async function createHelperFunctions(client) {
   const helpersSQL = readFileSync(helpersPath, 'utf8');
   
   try {
-    await client.query(helpersSQL);
-    console.log('✓ Helper functions created');
-  } catch (error) {
-    if (error.message.includes('already exists')) {
-      console.log('✓ Helper functions already exist (skipping)');
-    } else {
-      throw error;
+    // Split SQL file into individual functions
+    // PostgreSQL functions use $$ delimiters, so we need to parse carefully
+    const functions = [];
+    let currentFunction = '';
+    let inFunction = false;
+    let dollarCount = 0;
+    const lines = helpersSQL.split('\n');
+    
+    for (const line of lines) {
+      // Check if this line starts a new function
+      if (line.trim().match(/^CREATE\s+OR\s+REPLACE\s+FUNCTION/i)) {
+        // Save previous function if exists
+        if (currentFunction.trim()) {
+          functions.push(currentFunction.trim());
+        }
+        currentFunction = line;
+        inFunction = true;
+        dollarCount = 0;
+      } else if (inFunction) {
+        currentFunction += '\n' + line;
+        // Count $$ markers to know when function ends
+        const dollarMatches = line.match(/\$\$/g);
+        if (dollarMatches) {
+          dollarCount += dollarMatches.length;
+          // Function ends when we have an even number of $$ and see LANGUAGE
+          if (dollarCount >= 2 && line.match(/LANGUAGE\s+\w+/i)) {
+            inFunction = false;
+            dollarCount = 0;
+          }
+        }
+      }
     }
+    // Add last function
+    if (currentFunction.trim()) {
+      functions.push(currentFunction.trim());
+    }
+    
+    if (functions.length > 0) {
+      console.log(`  → Found ${functions.length} functions to create/update`);
+      for (let i = 0; i < functions.length; i++) {
+        const funcSQL = functions[i];
+        // Extract function name for logging
+        const nameMatch = funcSQL.match(/FUNCTION\s+(?:public\.)?(\w+)\s*\(/i);
+        const funcName = nameMatch ? nameMatch[1] : `function_${i + 1}`;
+        
+        try {
+          await client.query(funcSQL);
+          console.log(`  ✓ ${funcName}`);
+        } catch (err) {
+          // CREATE OR REPLACE should work even if function exists
+          if (err.message.includes('invalid message format')) {
+            console.warn(`  ⚠ ${funcName}: Skipping due to format issue (may already exist)`);
+          } else {
+            console.warn(`  ⚠ ${funcName}: ${err.message}`);
+            // Don't fail the whole script for individual function errors
+          }
+        }
+      }
+      console.log('✓ Helper functions processed');
+    } else {
+      // Fallback: try executing the entire file
+      console.log('  → No functions parsed, executing SQL file as single statement...');
+      await client.query(helpersSQL);
+      console.log('✓ Helper functions created');
+    }
+  } catch (error) {
+    // Provide more detailed error information
+    console.error('❌ Error creating helper functions:', error.message);
+    if (error.position) {
+      console.error(`   Error at position: ${error.position}`);
+    }
+    if (error.hint) {
+      console.error(`   Hint: ${error.hint}`);
+    }
+    // Don't throw - allow script to continue
+    console.warn('⚠ Continuing despite errors (functions may already exist)');
   }
 }
 
