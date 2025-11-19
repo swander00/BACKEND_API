@@ -86,10 +86,11 @@ A listing belongs to **Removed** when `MlsStatus` is any of the following:
 - `MlsStatus = 'Expired'`
 - `MlsStatus = 'Suspended'`
 - `MlsStatus = 'Cancelled'`
+- `MlsStatus = 'Withdrawn'`
 
 **Query Logic:**
 ```sql
-MlsStatus IN ('Terminated', 'Expired', 'Suspended', 'Cancelled')
+MlsStatus IN ('Terminated', 'Expired', 'Suspended', 'Cancelled', 'Withdrawn')
 ```
 
 ---

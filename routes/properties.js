@@ -102,18 +102,35 @@ router.get('/', async (req, res, next) => {
     logger.debug('Status filter applied', { 
       requestId: req.id,
       rawStatus: req.query.status,
-      normalizedStatus: filters.status 
+      normalizedStatus: filters.status,
+      isRemoved: filters.status === 'removed'
     });
+    
+    // Extra logging for removed status
+    if (filters.status === 'removed') {
+      console.log('[routes/properties] ========== REMOVED STATUS REQUEST ==========');
+      console.log('[routes/properties] Raw query param:', req.query.status);
+      console.log('[routes/properties] Normalized status:', filters.status);
+      console.log('[routes/properties] All filters:', JSON.stringify(filters, null, 2));
+      console.log('[routes/properties] ===========================================');
+    }
 
     const pagination = validatePagination(req.query.page, req.query.pageSize);
     const sortBy = sanitizeSortBy(req.query.sortBy);
 
-    // Cache key
+    // Cache key - skip cache for removed status to avoid stale empty results
     const cacheKey = buildCacheKey('properties:list', { filters, pagination, sortBy });
-    const cached = getCache(cacheKey);
-    if (cached) {
-      logger.debug('Cache hit', { requestId: req.id, key: cacheKey });
-      return res.json(cached);
+    let cached = null;
+    
+    // Skip cache for removed status (to avoid returning cached empty results)
+    if (filters.status !== 'removed') {
+      cached = getCache(cacheKey);
+      if (cached) {
+        logger.debug('Cache hit', { requestId: req.id, key: cacheKey });
+        return res.json(cached);
+      }
+    } else {
+      console.log('[routes/properties] Skipping cache for removed status (to avoid stale empty results)');
     }
 
     // Query PropertyView
@@ -123,14 +140,47 @@ router.get('/', async (req, res, next) => {
     
     logger.debug('Properties query completed', { requestId: req.id, duration: `${duration}ms`, count: result.properties.length });
 
+    // Extra logging for removed status
+    if (filters.status === 'removed') {
+      console.log('[routes/properties] ========== REMOVED STATUS RESPONSE ==========');
+      console.log('[routes/properties] Query result:', {
+        propertiesLength: result.properties?.length || 0,
+        totalCount: result.totalCount,
+        pagination: result.pagination
+      });
+      console.log('[routes/properties] Sample properties before mapping:', result.properties?.slice(0, 2).map(p => ({
+        ListingKey: p?.ListingKey,
+        MlsStatus: p?.MlsStatus
+      })) || []);
+    }
+
     // Map to PropertyCardResponse format
     const properties = result.properties.map(mapToPropertyCardResponse);
+
+    if (filters.status === 'removed') {
+      console.log('[routes/properties] After mapping:', {
+        propertiesLength: properties.length,
+        sampleProperties: properties.slice(0, 2).map(p => ({
+          listingKey: p?.listingKey,
+          mlsStatus: p?.mlsStatus || p?.status
+        }))
+      });
+    }
 
     const payload = {
       properties,
       pagination: result.pagination,
       totalCount: result.totalCount
     };
+
+    if (filters.status === 'removed') {
+      console.log('[routes/properties] Final payload:', {
+        propertiesLength: payload.properties?.length || 0,
+        totalCount: payload.totalCount,
+        pagination: payload.pagination
+      });
+      console.log('[routes/properties] ===========================================');
+    }
 
     // Set cache (30s TTL)
     setCache(cacheKey, payload, 30000);

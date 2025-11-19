@@ -24,9 +24,43 @@ export async function queryPropertyCards({ filters = {}, pagination = {}, sortBy
   const db = initDB();
   let query = db.from('PropertyView').select('*', { count: 'exact' });
 
+  // Debug: Log status filter
+  if (filters.status) {
+    console.log('[queryPropertyCards] ========== STATUS FILTER DEBUG ==========');
+    console.log('[queryPropertyCards] Status filter received:', filters.status);
+    console.log('[queryPropertyCards] Type of status:', typeof filters.status);
+    console.log('[queryPropertyCards] Status === "removed":', filters.status === 'removed');
+    
+    if (filters.status === 'removed') {
+      console.log('[queryPropertyCards] ✓ REMOVED STATUS DETECTED');
+      console.log('[queryPropertyCards] All filters:', JSON.stringify(filters, null, 2));
+      
+      // TEST: Try a direct query to verify the filter works
+      console.log('[queryPropertyCards] Running TEST QUERY...');
+      const testDb = initDB();
+      const testQuery = testDb.from('PropertyView').select('*', { count: 'exact' });
+      const testResult = await testQuery.in('MlsStatus', ['Terminated', 'Expired', 'Suspended', 'Cancelled', 'Withdrawn']).limit(5);
+      console.log('[queryPropertyCards] TEST QUERY RESULTS:', {
+        hasError: !!testResult.error,
+        error: testResult.error?.message || 'NONE',
+        errorCode: testResult.error?.code || 'NONE',
+        count: testResult.count,
+        dataLength: testResult.data?.length || 0,
+        sampleStatuses: testResult.data?.slice(0, 3).map(p => p?.MlsStatus) || [],
+        firstProperty: testResult.data?.[0] ? { ListingKey: testResult.data[0].ListingKey, MlsStatus: testResult.data[0].MlsStatus } : null
+      });
+      console.log('[queryPropertyCards] =========================================');
+    }
+  }
+
   // Apply filters
   // Note: Complex status filters (for_sale, for_lease) are handled with post-processing
   query = applyPropertyCardFilters(query, filters);
+  
+  // Debug: For removed status, log query state after filters applied
+  if (filters.status === 'removed') {
+    console.log('[queryPropertyCards] Query built, ready to execute with filters applied');
+  }
 
   // Apply map bounds if provided
   if (mapBounds) {
@@ -40,12 +74,14 @@ export async function queryPropertyCards({ filters = {}, pagination = {}, sortBy
   const statusFilter = filters.status;
   const needsPostProcessing = statusFilter && (statusFilter === 'for_sale' || statusFilter === 'for_lease');
   
+  // Extract pagination values at the start (needed for return statement)
+  const { page = 1, pageSize = 12 } = pagination;
+  
   let data, count;
   
   if (needsPostProcessing) {
     // Fetch larger dataset (up to 1000 records) for post-processing
     // This ensures we have enough data after filtering to fill the requested page
-    const { page = 1, pageSize = 12 } = pagination;
     const fetchSize = Math.min(1000, page * pageSize * 3); // Fetch 3x pages worth
     query = query.limit(fetchSize);
     
@@ -64,17 +100,78 @@ export async function queryPropertyCards({ filters = {}, pagination = {}, sortBy
     data = filtered.slice(from, to);
   } else {
     // Normal pagination for simple status filters
-    const { page = 1, pageSize = 12 } = pagination;
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
     query = query.range(from, to);
     
+    // For removed status, log the query before execution for debugging
+    if (filters.status === 'removed') {
+      console.log('[queryPropertyCards] Executing removed status query with pagination:', { from, to, page, pageSize });
+    }
+    
     const result = await query;
     if (result.error) {
+      console.error('[queryPropertyCards] Query error:', result.error);
+      if (filters.status === 'removed') {
+        console.error('[queryPropertyCards] Removed filter query failed:', {
+          error: result.error.message,
+          code: result.error.code,
+          details: result.error.details,
+          hint: result.error.hint,
+          queryUrl: result.error.queryUrl || 'N/A'
+        });
+      }
       throw new DatabaseError(`PropertyView query failed: ${result.error.message}`, result.error);
     }
     data = result.data || [];
     count = result.count || 0;
+    
+    // For removed status, log immediately after query execution
+    if (filters.status === 'removed') {
+      console.log('[queryPropertyCards] ========== REMOVED QUERY EXECUTION RESULTS ==========');
+      console.log('[queryPropertyCards] Query executed - checking results...');
+      console.log('[queryPropertyCards] Result object:', {
+        hasError: !!result.error,
+        error: result.error?.message || 'NONE',
+        errorCode: result.error?.code || 'NONE',
+        errorDetails: result.error?.details || 'NONE',
+        errorHint: result.error?.hint || 'NONE',
+        resultCount: result.count,
+        resultDataLength: result.data?.length || 0,
+        resultDataType: Array.isArray(result.data) ? 'array' : typeof result.data
+      });
+      console.log('[queryPropertyCards] Extracted values:', {
+        count,
+        dataLength: data.length,
+        page,
+        pageSize,
+        from,
+        to
+      });
+      
+      if (result.data && result.data.length > 0) {
+        console.log('[queryPropertyCards] Sample properties:', result.data.slice(0, 3).map(p => ({
+          ListingKey: p?.ListingKey,
+          MlsStatus: p?.MlsStatus,
+          FullAddress: p?.FullAddress
+        })));
+      } else {
+        console.warn('[queryPropertyCards] ⚠️ NO DATA RETURNED FROM QUERY');
+        console.warn('[queryPropertyCards] This suggests the filter is not matching any records');
+      }
+      
+      // If count is 0 but we expect results, log a warning
+      if (count === 0 && data.length === 0) {
+        console.error('[queryPropertyCards] ❌ REMOVED FILTER RETURNED 0 RESULTS');
+        console.error('[queryPropertyCards] Expected ~1110 properties (963 Terminated + 140 Suspended + 7 Expired)');
+        console.error('[queryPropertyCards] Possible causes:');
+        console.error('  1. Filter not applied correctly');
+        console.error('  2. MlsStatus values don\'t match exactly');
+        console.error('  3. Query construction issue');
+        console.error('  4. Database view issue');
+      }
+      console.log('[queryPropertyCards] =====================================================');
+    }
   }
 
   const totalPages = Math.ceil((count || 0) / pageSize);
@@ -238,7 +335,14 @@ function applyStatusFilter(query, status) {
       
     case 'removed':
       // REMOVED: Multiple statuses
-      return query.in('MlsStatus', ['Terminated', 'Expired', 'Suspended', 'Cancelled']);
+      // Use .in() method directly - Supabase PostgREST supports this
+      // Based on database: Terminated (963), Suspended (140), Expired (7)
+      const removedStatuses = ['Terminated', 'Expired', 'Suspended', 'Cancelled', 'Withdrawn'];
+      console.log('[applyStatusFilter] Applying removed filter with statuses:', removedStatuses);
+      // Use .in() method - this creates: MlsStatus IN ('Terminated', 'Expired', 'Suspended', 'Cancelled', 'Withdrawn')
+      const filteredQuery = query.in('MlsStatus', removedStatuses);
+      console.log('[applyStatusFilter] Removed filter applied using .in() method with', removedStatuses.length, 'statuses');
+      return filteredQuery;
       
     default:
       // Default to for_sale if invalid status
@@ -269,11 +373,13 @@ function applyPropertyCardFilters(query, filters) {
   }
 
   // Price range
-  if (filters.minPrice) {
-    query = query.gte('ListPrice', filters.minPrice);
+  // NOTE: Use ListPriceRaw (numeric) instead of ListPrice (formatted string)
+  // For removed status, skip price filters as removed properties may not have prices
+  if (filters.minPrice && filters.status !== 'removed') {
+    query = query.gte('ListPriceRaw', filters.minPrice);
   }
-  if (filters.maxPrice) {
-    query = query.lte('ListPrice', filters.maxPrice);
+  if (filters.maxPrice && filters.status !== 'removed') {
+    query = query.lte('ListPriceRaw', filters.maxPrice);
   }
 
   // Bedrooms
@@ -318,9 +424,25 @@ function applyPropertyCardFilters(query, filters) {
           'Price Reduced', 'Price Change', 'Extension'
         ]);
       }
+    } else if (filters.status === 'removed') {
+      // REMOVED: Apply .in() directly (same pattern as for_sale/for_lease above)
+      const removedStatuses = ['Terminated', 'Expired', 'Suspended', 'Cancelled', 'Withdrawn'];
+      console.log('[applyPropertyCardFilters] ========== APPLYING REMOVED FILTER ==========');
+      console.log('[applyPropertyCardFilters] Status:', filters.status);
+      console.log('[applyPropertyCardFilters] Removed statuses:', removedStatuses);
+      console.log('[applyPropertyCardFilters] Query before filter:', query);
+      
+      // Apply .in() method directly (same pattern as for_sale/for_lease)
+      query = query.in('MlsStatus', removedStatuses);
+      
+      console.log('[applyPropertyCardFilters] Query after .in() filter:', query);
+      console.log('[applyPropertyCardFilters] ✓ Removed filter applied using .in() method');
+      console.log('[applyPropertyCardFilters] ===============================================');
     } else {
-      // Simple statuses: sold, leased, removed
+      // Simple statuses: sold, leased (use applyStatusFilter)
+      console.log('[applyPropertyCardFilters] Applying simple status filter:', filters.status);
       query = applyStatusFilter(query, filters.status);
+      console.log('[applyPropertyCardFilters] Status filter applied, query built');
     }
   }
 
