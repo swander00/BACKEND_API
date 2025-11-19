@@ -163,3 +163,49 @@ export function validateListingKey(listingKey) {
   return listingKey;
 }
 
+/**
+ * Validate and normalize status filter parameter
+ * Returns normalized status value or 'for_sale' as default
+ * 
+ * Accepts both formats:
+ * - Frontend format: "For Sale", "Sold", "For Lease", "Leased", "Removed"
+ * - Backend format: "for_sale", "sold", "for_lease", "leased", "removed"
+ * 
+ * @param {string|undefined} status - Status value from query parameter
+ * @returns {string} - Normalized status value (snake_case)
+ */
+export function validateStatus(status) {
+  // Default to 'for_sale' if not provided
+  if (!status || typeof status !== 'string') {
+    return 'for_sale';
+  }
+  
+  // Map frontend format to backend format
+  const statusMap = {
+    'for sale': 'for_sale',
+    'for lease': 'for_lease',
+    'sold': 'sold',
+    'leased': 'leased',
+    'removed': 'removed',
+    // Also accept snake_case format directly
+    'for_sale': 'for_sale',
+    'for_lease': 'for_lease',
+  };
+  
+  // Normalize: trim whitespace and convert to lowercase
+  const normalized = status.trim().toLowerCase();
+  
+  // Check if it's a known status
+  const mappedStatus = statusMap[normalized];
+  
+  if (!mappedStatus) {
+    throw new ValidationError(
+      `Invalid status: "${status}". Must be one of: For Sale, For Lease, Sold, Leased, Removed`,
+      'status',
+      status
+    );
+  }
+  
+  return mappedStatus;
+}
+

@@ -19,7 +19,17 @@ import { createClient } from '@supabase/supabase-js';
 import { runSequentialSync } from './sync/sequential.js';
 import { fetchPropertyCount } from './services/api.js';
 
-dotenv.config({ path: './environment.env' });
+// Load environment variables from .env.local (preferred) or fallback to environment.env
+const envLocalResult = dotenv.config({ path: './.env.local' });
+if (envLocalResult.error && envLocalResult.error.code !== 'ENOENT') {
+  console.log('Warning: Could not load .env.local:', envLocalResult.error.message);
+}
+if (!process.env.SUPABASE_URL) {
+  const envResult = dotenv.config({ path: './environment.env' });
+  if (envResult.error && envResult.error.code !== 'ENOENT') {
+    console.log('Warning: Could not load environment.env:', envResult.error.message);
+  }
+}
 
 // ===============================================================================================
 // [1] PARSE COMMAND LINE ARGUMENTS

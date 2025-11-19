@@ -14,7 +14,7 @@ import {
   queryMapPopupProperties
 } from '../services/propertyQueries.js';
 import { buildCacheKey, getCache, setCache } from '../utils/cache.js';
-import { parseNumber, parseArrayParam, parseBoolean, validatePagination, validateSearchTerm, validateMapBounds, validateListingKey } from '../utils/validation.js';
+import { parseNumber, parseArrayParam, parseBoolean, validatePagination, validateSearchTerm, validateMapBounds, validateListingKey, validateStatus } from '../utils/validation.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
@@ -32,7 +32,7 @@ const router = express.Router();
 router.get('/map', async (req, res, next) => {
   try {
     const filters = {
-      status: req.query.status,
+      status: validateStatus(req.query.status), // Validates and defaults to 'for_sale'
       minPrice: parseNumber(req.query.minPrice, 0, 100000000, 'minPrice'),
       maxPrice: parseNumber(req.query.maxPrice, 0, 100000000, 'maxPrice')
     };
@@ -90,13 +90,20 @@ router.get('/', async (req, res, next) => {
       maxBathrooms: parseNumber(req.query.maxBathrooms, 0, 20, 'maxBathrooms'),
       minSquareFeet: parseNumber(req.query.minSquareFeet, 0, 100000, 'minSquareFeet'),
       maxSquareFeet: parseNumber(req.query.maxSquareFeet, 0, 100000, 'maxSquareFeet'),
-      status: typeof req.query.status === 'string' ? req.query.status : undefined,
+      status: validateStatus(req.query.status), // Validates and defaults to 'for_sale'
       hasOpenHouse: parseBoolean(req.query.hasOpenHouse),
       hasVirtualTour: parseBoolean(req.query.hasVirtualTour),
       minGarageSpaces: parseNumber(req.query.minGarageSpaces, 0, 20, 'minGarageSpaces'),
       minTotalParking: parseNumber(req.query.minTotalParking, 0, 20, 'minTotalParking'),
       searchTerm: validateSearchTerm(req.query.searchTerm, 80)
     };
+
+    // Debug logging for status filter
+    logger.debug('Status filter applied', { 
+      requestId: req.id,
+      rawStatus: req.query.status,
+      normalizedStatus: filters.status 
+    });
 
     const pagination = validatePagination(req.query.page, req.query.pageSize);
     const sortBy = sanitizeSortBy(req.query.sortBy);

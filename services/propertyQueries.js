@@ -25,6 +25,7 @@ export async function queryPropertyCards({ filters = {}, pagination = {}, sortBy
   let query = db.from('PropertyView').select('*', { count: 'exact' });
 
   // Apply filters
+  // Note: Complex status filters (for_sale, for_lease) are handled with post-processing
   query = applyPropertyCardFilters(query, filters);
 
   // Apply map bounds if provided
@@ -35,17 +36,45 @@ export async function queryPropertyCards({ filters = {}, pagination = {}, sortBy
   // Apply sorting
   query = applySorting(query, sortBy);
 
-  // Apply pagination
-  const { page = 1, pageSize = 12 } = pagination;
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-  query = query.range(from, to);
-
-  // Execute query
-  const { data, error, count } = await query;
-
-  if (error) {
-    throw new DatabaseError(`PropertyView query failed: ${error.message}`, error);
+  // For complex status filters, fetch more data before pagination to account for post-processing
+  const statusFilter = filters.status;
+  const needsPostProcessing = statusFilter && (statusFilter === 'for_sale' || statusFilter === 'for_lease');
+  
+  let data, count;
+  
+  if (needsPostProcessing) {
+    // Fetch larger dataset (up to 1000 records) for post-processing
+    // This ensures we have enough data after filtering to fill the requested page
+    const { page = 1, pageSize = 12 } = pagination;
+    const fetchSize = Math.min(1000, page * pageSize * 3); // Fetch 3x pages worth
+    query = query.limit(fetchSize);
+    
+    const result = await query;
+    if (result.error) {
+      throw new DatabaseError(`PropertyView query failed: ${result.error.message}`, result.error);
+    }
+    
+    // Filter by TransactionType in memory
+    const filtered = applyStatusFilterPostProcess(result.data || [], statusFilter);
+    count = filtered.length;
+    
+    // Apply pagination after filtering
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize;
+    data = filtered.slice(from, to);
+  } else {
+    // Normal pagination for simple status filters
+    const { page = 1, pageSize = 12 } = pagination;
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    query = query.range(from, to);
+    
+    const result = await query;
+    if (result.error) {
+      throw new DatabaseError(`PropertyView query failed: ${result.error.message}`, result.error);
+    }
+    data = result.data || [];
+    count = result.count || 0;
   }
 
   const totalPages = Math.ceil((count || 0) / pageSize);
@@ -61,6 +90,164 @@ export async function queryPropertyCards({ filters = {}, pagination = {}, sortBy
       hasPrevPage: page > 1
     }
   };
+}
+
+/**
+ * Fallback query method for complex status filters
+ * Fetches broader dataset and filters in memory
+ */
+async function queryPropertyCardsWithFallbackStatusFilter({ filters, pagination, sortBy, mapBounds, statusFilter }) {
+  const db = initDB();
+  let query = db.from('PropertyView').select('*', { count: 'exact' });
+
+  // Apply all filters except status
+  const otherFilters = { ...filters };
+  delete otherFilters.status;
+  query = applyPropertyCardFilters(query, otherFilters);
+
+  // Apply broader status filter (just MlsStatus values, no TransactionType check)
+  if (statusFilter === 'for_sale') {
+    query = query.in('MlsStatus', ['For Sale', 'Sold Conditional', 'Sold Conditional Escape', 'Price Reduced', 'Price Change', 'Extension']);
+  } else if (statusFilter === 'for_lease') {
+    query = query.in('MlsStatus', ['For Lease', 'For Sub-Lease', 'For Lease Conditional', 'For Lease Conditional Escape', 'Price Reduced', 'Price Change', 'Extension']);
+  }
+
+  if (mapBounds) {
+    query = applyMapBounds(query, mapBounds);
+  }
+
+  query = applySorting(query, sortBy);
+
+  // Fetch more data than needed for post-processing
+  const { page = 1, pageSize = 12 } = pagination;
+  const fetchSize = pageSize * 3; // Fetch 3x to account for filtering
+  query = query.limit(fetchSize);
+
+  const { data, error } = await query;
+  if (error) {
+    throw new DatabaseError(`PropertyView query failed: ${error.message}`, error);
+  }
+
+  // Apply TransactionType filter in memory
+  const filtered = applyStatusFilterPostProcess(data || [], statusFilter);
+
+  // Apply pagination in memory
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize;
+  const paginated = filtered.slice(from, to);
+
+  const totalPages = Math.ceil(filtered.length / pageSize);
+
+  return {
+    properties: paginated,
+    totalCount: filtered.length,
+    pagination: {
+      page,
+      pageSize,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1
+    }
+  };
+}
+
+/**
+ * Post-process results to apply TransactionType filtering for complex status cases
+ */
+function applyStatusFilterPostProcess(data, statusFilter) {
+  if (!data || data.length === 0) return data;
+
+  return data.filter(record => {
+    const mlsStatus = record.MlsStatus;
+    const transactionType = record.TransactionType;
+
+    if (statusFilter === 'for_sale') {
+      // Direct statuses
+      if (['For Sale', 'Sold Conditional', 'Sold Conditional Escape'].includes(mlsStatus)) {
+        return true;
+      }
+      // Special cases requiring TransactionType check
+      if (['Price Reduced', 'Price Change', 'Extension'].includes(mlsStatus) && transactionType === 'For Sale') {
+        return true;
+      }
+      return false;
+    }
+
+    if (statusFilter === 'for_lease') {
+      // Direct statuses
+      if (['For Lease', 'For Sub-Lease', 'For Lease Conditional', 'For Lease Conditional Escape'].includes(mlsStatus)) {
+        return true;
+      }
+      // Special cases requiring TransactionType check
+      if (['Price Reduced', 'Price Change', 'Extension'].includes(mlsStatus) && transactionType === 'For Lease') {
+        return true;
+      }
+      return false;
+    }
+
+    return true; // Other statuses already filtered by query
+  });
+}
+
+/**
+ * Apply status filter with complex mapping rules
+ * See FILTERS_API.md for detailed mapping rules
+ * 
+ * IMPORTANT: PropertyView.MlsStatus is transformed by status_display_logic CTE:
+ * - If raw MlsStatus='New' → shows TransactionType ('For Sale' or 'For Lease')
+ * - If price dropped → shows 'Price Reduced'
+ * - Otherwise → shows raw MlsStatus
+ * 
+ * Strategy: Since PostgREST's .or() with nested .and. is unreliable,
+ * we'll use a simpler approach: filter by MlsStatus first, then apply
+ * TransactionType filter in memory for complex cases, OR use multiple
+ * simple filters that PostgREST handles well.
+ * 
+ * @param {Object} query - Supabase query builder
+ * @param {string} status - Status value (for_sale, for_lease, sold, leased, removed)
+ * @returns {Object} - Modified query builder
+ */
+function applyStatusFilter(query, status) {
+  switch (status) {
+    case 'for_sale':
+      // FOR SALE: Use PostgREST filter syntax
+      // Format: or('condition1,condition2') where each condition is a filter expression
+      // For values with spaces, use quotes: "For Sale"
+      // For AND conditions: field1.eq.value1.and.field2.eq.value2
+      return query.or(
+        'MlsStatus.in.("For Sale","Sold Conditional","Sold Conditional Escape"),' +
+        'MlsStatus.eq."Price Reduced".and.TransactionType.eq."For Sale",' +
+        'MlsStatus.in.("Price Change","Extension").and.TransactionType.eq."For Sale"'
+      );
+      
+    case 'for_lease':
+      // FOR LEASE: Similar approach
+      return query.or(
+        'MlsStatus.in.("For Lease","For Sub-Lease","For Lease Conditional","For Lease Conditional Escape"),' +
+        'MlsStatus.eq."Price Reduced".and.TransactionType.eq."For Lease",' +
+        'MlsStatus.in.("Price Change","Extension").and.TransactionType.eq."For Lease"'
+      );
+      
+    case 'sold':
+      // SOLD: Simple equality
+      return query.eq('MlsStatus', 'Sold');
+      
+    case 'leased':
+      // LEASED: Simple equality
+      return query.eq('MlsStatus', 'Leased');
+      
+    case 'removed':
+      // REMOVED: Multiple statuses
+      return query.in('MlsStatus', ['Terminated', 'Expired', 'Suspended', 'Cancelled']);
+      
+    default:
+      // Default to for_sale if invalid status
+      return query.or(
+        'MlsStatus.in.("For Sale","Sold Conditional","Sold Conditional Escape"),' +
+        'MlsStatus.eq."Price Reduced".and.TransactionType.eq."For Sale",' +
+        'MlsStatus.in.("Price Change","Extension").and.TransactionType.eq."For Sale"'
+      );
+  }
 }
 
 /**
@@ -113,9 +300,28 @@ function applyPropertyCardFilters(query, filters) {
     query = query.lte('LivingAreaMin', filters.maxSquareFeet);
   }
 
-  // Status filter (use MlsStatus instead of Status)
+  // Status filter - complex mapping logic (see FILTERS_API.md)
+  // Simple statuses use direct filters, complex ones (for_sale, for_lease) 
+  // use broader filter + post-processing
   if (filters.status) {
-    query = query.eq('MlsStatus', filters.status);
+    if (filters.status === 'for_sale' || filters.status === 'for_lease') {
+      // For complex statuses, use broader MlsStatus filter
+      // TransactionType filtering will be done in post-processing
+      if (filters.status === 'for_sale') {
+        query = query.in('MlsStatus', [
+          'For Sale', 'Sold Conditional', 'Sold Conditional Escape',
+          'Price Reduced', 'Price Change', 'Extension'
+        ]);
+      } else {
+        query = query.in('MlsStatus', [
+          'For Lease', 'For Sub-Lease', 'For Lease Conditional', 'For Lease Conditional Escape',
+          'Price Reduced', 'Price Change', 'Extension'
+        ]);
+      }
+    } else {
+      // Simple statuses: sold, leased, removed
+      query = applyStatusFilter(query, filters.status);
+    }
   }
 
   // Open house
@@ -327,7 +533,7 @@ export async function queryMapPopupProperties(filters = {}, mapBounds) {
 
   // Apply basic filters (status, price range)
   if (filters.status) {
-    query = query.eq('MlsStatus', filters.status);
+    query = applyStatusFilter(query, filters.status);
   }
   if (filters.minPrice) {
     query = query.gte('ListPrice', filters.minPrice);
