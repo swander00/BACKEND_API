@@ -230,9 +230,6 @@ function applyStatusFilterPostProcess(data, statusFilter) {
  * @param {string} status - Status value (for_sale, for_lease, sold, leased, removed)
  * @returns {Object} - Modified query builder
  */
-// Import centralized status timestamp mapper
-const { getTimestampColumnForStatus, buildRemovedDateFilter } = require('../utils/statusTimestampMapper');
-
 function applyStatusFilter(query, status) {
   switch (status) {
     case 'for_sale':
