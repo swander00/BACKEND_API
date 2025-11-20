@@ -66,6 +66,7 @@ export function formatErrorResponse(error, requestId = null) {
 
 /**
  * Error handling middleware
+ * IMPORTANT: Must set CORS headers before sending error response
  */
 export function errorHandler(err, req, res, next) {
   const requestId = req.id || null;
@@ -78,6 +79,25 @@ export function errorHandler(err, req, res, next) {
     method: req.method,
     stack: err.stack
   });
+
+  // Set CORS headers before sending error response
+  // This ensures CORS errors don't mask actual errors
+  const origin = req.headers.origin;
+  if (origin) {
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    const localhostRegex = /^https?:\/\/localhost(:\d+)?$/;
+    
+    const isAllowed = localhostRegex.test(origin) || allowedOrigins.includes(origin);
+    
+    if (isAllowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
 
   // Handle known error types
   if (err instanceof ApiError) {
@@ -114,8 +134,27 @@ export function errorHandler(err, req, res, next) {
 
 /**
  * 404 handler
+ * IMPORTANT: Must set CORS headers before sending error response
  */
 export function notFoundHandler(req, res) {
+  // Set CORS headers before sending error response
+  const origin = req.headers.origin;
+  if (origin) {
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    const localhostRegex = /^https?:\/\/localhost(:\d+)?$/;
+    
+    const isAllowed = localhostRegex.test(origin) || allowedOrigins.includes(origin);
+    
+    if (isAllowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
+  
   res.status(404).json(formatErrorResponse(
     new NotFoundError('Endpoint', req.path),
     req.id || null

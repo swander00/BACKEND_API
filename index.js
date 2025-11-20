@@ -106,18 +106,18 @@ app.use(requestLogger);
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
-app.use((req, res, next) => {
+// Helper function to set CORS headers
+function setCorsHeaders(req, res) {
   const origin = req.headers.origin;
   
+  // Always set CORS headers for preflight and methods
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
   if (!origin) {
-    // Non-browser or same-origin request - no CORS header needed
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(200);
-    }
-    return next();
+    // Non-browser or same-origin request - no origin header needed
+    return false; // Not a cross-origin request
   }
   
   // Check if origin is allowed
@@ -136,11 +136,23 @@ app.use((req, res, next) => {
   if (isAllowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+    return true; // CORS headers set
   }
   
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // Log warning in production if origin is not allowed
+  if (!isDevelopment && origin) {
+    logger.warn('CORS: Origin not allowed', { 
+      origin, 
+      allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : 'none configured',
+      hint: 'Set ALLOWED_ORIGINS environment variable in Railway'
+    });
+  }
+  
+  return false; // Origin not allowed
+}
+
+app.use((req, res, next) => {
+  setCorsHeaders(req, res);
   
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
