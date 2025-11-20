@@ -496,10 +496,10 @@ function applySorting(query, sortBy) {
   switch (sortBy) {
     case 'newest':
       // Use raw timestamp field for proper chronological sorting (newest listings first)
-      return query.order('OriginalEntryTimestampRaw', { ascending: false });
+      return query.order('ModificationTimestamp', { ascending: false });
     case 'oldest':
       // Use raw timestamp field for proper chronological sorting (oldest listings first)
-      return query.order('OriginalEntryTimestampRaw', { ascending: true });
+      return query.order('ModificationTimestamp', { ascending: true });
     case 'price_asc':
       // Use raw numeric field for proper numeric sorting (lowest price first)
       return query.order('ListPriceRaw', { ascending: true });
@@ -517,7 +517,7 @@ function applySorting(query, sortBy) {
       return query.order('LivingAreaMax', { ascending: false });
     default:
       // Use raw timestamp field for proper chronological sorting (newest listings first)
-      return query.order('OriginalEntryTimestampRaw', { ascending: false });
+      return query.order('ModificationTimestamp', { ascending: false });
   }
 }
 
