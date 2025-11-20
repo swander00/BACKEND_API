@@ -80,12 +80,19 @@ export async function queryPropertyCards({ filters = {}, pagination = {}, sortBy
   let data, count;
   
   if (needsPostProcessing) {
-    // Fetch larger dataset (up to 1000 records) for post-processing
-    // This ensures we have enough data after filtering to fill the requested page
-    const fetchSize = Math.min(1000, page * pageSize * 3); // Fetch 3x pages worth
+    // Fetch larger dataset for post-processing, but limit to reasonable size
+    // Fetch enough to fill current page + next page to account for filtering
+    const fetchSize = Math.min(500, Math.max(pageSize * 5, 50)); // Fetch 5x pages worth, min 50, max 500
     query = query.limit(fetchSize);
     
+    const queryStartTime = Date.now();
     const result = await query;
+    const queryDuration = Date.now() - queryStartTime;
+    
+    if (queryDuration > 10000) {
+      console.warn(`[queryPropertyCards] Slow query detected: ${queryDuration}ms for post-processing filter`);
+    }
+    
     if (result.error) {
       throw new DatabaseError(`PropertyView query failed: ${result.error.message}`, result.error);
     }
@@ -109,7 +116,14 @@ export async function queryPropertyCards({ filters = {}, pagination = {}, sortBy
       console.log('[queryPropertyCards] Executing removed status query with pagination:', { from, to, page, pageSize });
     }
     
+    const queryStartTime = Date.now();
     const result = await query;
+    const queryDuration = Date.now() - queryStartTime;
+    
+    if (queryDuration > 10000) {
+      console.warn(`[queryPropertyCards] Slow query detected: ${queryDuration}ms for status filter: ${filters.status}`);
+    }
+    
     if (result.error) {
       console.error('[queryPropertyCards] Query error:', result.error);
       if (filters.status === 'removed') {

@@ -15,6 +15,14 @@ let supabase = null;
 
 export function initDB() {
   if (!supabase) {
+    // Validate required environment variables
+    if (!process.env.SUPABASE_URL) {
+      throw new Error('SUPABASE_URL environment variable is required. Please set it in .env.local or environment.env');
+    }
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error('SUPABASE_SERVICE_ROLE_KEY environment variable is required. Please set it in .env.local or environment.env');
+    }
+    
     supabase = createClient(
       process.env.SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY

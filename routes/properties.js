@@ -138,7 +138,19 @@ router.get('/', async (req, res, next) => {
     const result = await queryPropertyCards({ filters, pagination, sortBy });
     const duration = Date.now() - startTime;
     
-    logger.debug('Properties query completed', { requestId: req.id, duration: `${duration}ms`, count: result.properties.length });
+    // Log performance metrics
+    if (duration > 5000) {
+      logger.warn('Slow query detected', { 
+        requestId: req.id, 
+        duration: `${duration}ms`, 
+        count: result.properties.length,
+        filters: JSON.stringify(filters),
+        pagination,
+        sortBy
+      });
+    } else {
+      logger.debug('Properties query completed', { requestId: req.id, duration: `${duration}ms`, count: result.properties.length });
+    }
 
     // Extra logging for removed status
     if (filters.status === 'removed') {

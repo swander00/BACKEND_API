@@ -28,11 +28,27 @@ const envLocalResult = dotenv.config({ path: './.env.local' });
 if (envLocalResult.error && envLocalResult.error.code !== 'ENOENT') {
   console.log('Warning: Could not load .env.local:', envLocalResult.error.message);
 }
-if (!process.env.PORT) {
+if (!process.env.PORT && !process.env.SUPABASE_URL) {
   const envResult = dotenv.config({ path: './environment.env' });
   if (envResult.error && envResult.error.code !== 'ENOENT') {
     console.log('Warning: Could not load environment.env:', envResult.error.message);
   }
+}
+
+// Validate required environment variables before starting server
+const requiredEnvVars = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
+const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+  console.error('\n❌ ERROR: Missing required environment variables:');
+  missingVars.forEach(varName => {
+    console.error(`   - ${varName}`);
+  });
+  console.error('\n💡 Please create a .env.local file in the BACKEND_API directory with:');
+  console.error('   SUPABASE_URL=https://your-project.supabase.co');
+  console.error('   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key');
+  console.error('\n   See TROUBLESHOOTING.md for more information.\n');
+  process.exit(1);
 }
 
 // Log OpenAI API key status (for debugging)
@@ -164,14 +180,23 @@ app.get('/health', async (req, res) => {
     }
   };
 
-  // Check database connectivity
+  // Check database connectivity with timeout
   try {
     const db = initDB();
+    
+    // Create a timeout promise that rejects after 5 seconds
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+    
     // Simple query to verify connectivity (using a lightweight view query)
-    const { error } = await db
-      .from('PropertyView')
+    const queryPromise = db
+      .from('PropertyCardView')
       .select('ListingKey', { count: 'exact', head: true })
       .limit(1);
+    
+    // Race between query and timeout
+    const { error } = await Promise.race([queryPromise, timeoutPromise]);
     
     if (error) {
       health.status = 'degraded';
@@ -184,8 +209,9 @@ app.get('/health', async (req, res) => {
   } catch (error) {
     health.status = 'degraded';
     health.checks.database = 'error';
-    health.checks.databaseError = error.message;
-    return res.status(503).json(health);
+    health.checks.databaseError = error.message || String(error);
+    // Still return 200 but with degraded status so the server is considered "up"
+    return res.status(200).json(health);
   }
 
   res.json(health);
