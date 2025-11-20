@@ -31,8 +31,39 @@ const router = express.Router();
  */
 router.get('/map', async (req, res, next) => {
   try {
+    // Parse multi-value parameters (same logic as main route)
+    const parseMultiValueParam = (paramName) => {
+      const expressValue = req.query[paramName];
+      if (Array.isArray(expressValue)) {
+        return parseArrayParam(expressValue, 20);
+      }
+      try {
+        // Use originalUrl to ensure we get the full URL with query string
+        const fullUrl = req.originalUrl || req.url;
+        const queryString = fullUrl.split('?')[1] || '';
+        if (!queryString) {
+          return parseArrayParam(expressValue, 20);
+        }
+        const params = new URLSearchParams(queryString);
+        const allValues = params.getAll(paramName);
+        if (allValues.length > 1) {
+          return parseArrayParam(allValues, 20);
+        } else if (allValues.length === 1) {
+          return parseArrayParam(allValues[0], 20);
+        }
+        return parseArrayParam(expressValue, 20);
+      } catch (e) {
+        logger.warn('Failed to parse multi-value param in map route', { paramName, error: e.message });
+        return parseArrayParam(expressValue, 20);
+      }
+    };
+    
     const filters = {
+      city: parseMultiValueParam('city'),
       status: validateStatus(req.query.status), // Validates and defaults to 'for_sale'
+      dateFrom: req.query.dateFrom && req.query.dateFrom !== 'null' && req.query.dateFrom !== '' 
+        ? req.query.dateFrom 
+        : null, // ISO date string (YYYY-MM-DD) or null
       minPrice: parseNumber(req.query.minPrice, 0, 100000000, 'minPrice'),
       maxPrice: parseNumber(req.query.maxPrice, 0, 100000000, 'maxPrice')
     };
@@ -79,9 +110,75 @@ router.get('/map', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     // Parse query parameters with validation
+    // IMPORTANT: Express.js does NOT parse duplicate query params (?city=A&city=B) as arrays by default
+    // We need to manually parse the raw query string to get all values
+    const parseMultiValueParam = (paramName) => {
+      // First check if Express already parsed it as an array (some configurations might)
+      const expressValue = req.query[paramName];
+      if (Array.isArray(expressValue)) {
+        logger.debug(`[parseMultiValueParam] ${paramName} already an array from Express`, { values: expressValue });
+        return parseArrayParam(expressValue, 20);
+      }
+      
+      // Parse raw query string to get all values
+      // Use req.originalUrl to ensure we get the full URL with query string
+      // This handles ?city=Brampton&city=Caledon correctly
+      try {
+        // Use originalUrl which preserves the full URL including query string
+        const fullUrl = req.originalUrl || req.url;
+        const queryString = fullUrl.split('?')[1] || '';
+        
+        logger.debug(`[parseMultiValueParam] Parsing ${paramName}`, {
+          fullUrl,
+          queryString,
+          expressValue
+        });
+        
+        if (!queryString) {
+          // No query string - use Express parsed value
+          return parseArrayParam(expressValue, 20);
+        }
+        
+        const params = new URLSearchParams(queryString);
+        const allValues = params.getAll(paramName);
+        
+        logger.debug(`[parseMultiValueParam] Found values for ${paramName}`, {
+          allValues,
+          count: allValues.length,
+          expressValue
+        });
+        
+        if (allValues.length > 1) {
+          // Multiple values found - return as array
+          const result = parseArrayParam(allValues, 20);
+          logger.debug(`[parseMultiValueParam] Returning array for ${paramName}`, { result });
+          return result;
+        } else if (allValues.length === 1) {
+          // Single value - parse normally (will return array with one element)
+          const result = parseArrayParam(allValues[0], 20);
+          logger.debug(`[parseMultiValueParam] Returning single value for ${paramName}`, { result });
+          return result;
+        }
+        
+        // No values found in query string - check Express parsed value (might be single string)
+        const result = parseArrayParam(expressValue, 20);
+        logger.debug(`[parseMultiValueParam] No values in query string, using Express value for ${paramName}`, { result });
+        return result;
+      } catch (e) {
+        // Fallback to Express parsed value if URL parsing fails
+        logger.warn('Failed to parse multi-value param from query string', {
+          paramName,
+          error: e.message,
+          stack: e.stack,
+          fallbackToExpress: true
+        });
+        return parseArrayParam(expressValue, 20);
+      }
+    };
+    
     const filters = {
-      city: parseArrayParam(req.query.city, 20),
-      propertyType: parseArrayParam(req.query.propertyType, 20),
+      city: parseMultiValueParam('city'),
+      propertyType: parseMultiValueParam('propertyType'),
       minPrice: parseNumber(req.query.minPrice, 0, 100000000, 'minPrice'),
       maxPrice: parseNumber(req.query.maxPrice, 0, 100000000, 'maxPrice'),
       minBedrooms: parseNumber(req.query.minBedrooms, 0, 20, 'minBedrooms'),
@@ -91,12 +188,38 @@ router.get('/', async (req, res, next) => {
       minSquareFeet: parseNumber(req.query.minSquareFeet, 0, 100000, 'minSquareFeet'),
       maxSquareFeet: parseNumber(req.query.maxSquareFeet, 0, 100000, 'maxSquareFeet'),
       status: validateStatus(req.query.status), // Validates and defaults to 'for_sale'
+      dateFrom: req.query.dateFrom && req.query.dateFrom !== 'null' && req.query.dateFrom !== '' 
+        ? req.query.dateFrom 
+        : null, // ISO date string (YYYY-MM-DD) or null
       hasOpenHouse: parseBoolean(req.query.hasOpenHouse),
       hasVirtualTour: parseBoolean(req.query.hasVirtualTour),
       minGarageSpaces: parseNumber(req.query.minGarageSpaces, 0, 20, 'minGarageSpaces'),
       minTotalParking: parseNumber(req.query.minTotalParking, 0, 20, 'minTotalParking'),
       searchTerm: validateSearchTerm(req.query.searchTerm, 80)
     };
+    
+    // Debug logging for city filter (multi-select)
+    if (req.query.city || filters.city) {
+      logger.debug('City filter received', { 
+        requestId: req.id,
+        rawCity: req.query.city,
+        parsedCity: filters.city,
+        isArray: Array.isArray(filters.city),
+        cityCount: Array.isArray(filters.city) ? filters.city.length : (filters.city ? 1 : 0),
+        cities: filters.city
+      });
+    }
+    
+    // Debug logging for propertyType filter
+    if (req.query.propertyType || filters.propertyType) {
+      logger.debug('PropertyType filter received', { 
+        requestId: req.id,
+        rawPropertyType: req.query.propertyType,
+        parsedPropertyType: filters.propertyType,
+        isArray: Array.isArray(filters.propertyType),
+        arrayLength: Array.isArray(filters.propertyType) ? filters.propertyType.length : 0
+      });
+    }
 
     // Debug logging for status filter
     logger.debug('Status filter applied', { 
@@ -321,6 +444,7 @@ function mapToPropertyCardResponse(record) {
     price: record.ListPrice || 0,
     listPrice: record.ListPrice, // Keep for backward compatibility
     originalListPrice: record.OriginalListPrice,
+    closePrice: record.ClosePrice, // For Sold properties
     isPriceReduced: record.IsPriceReduced || false,
     priceReductionAmount: parsePriceReduction(record.PriceReductionAmount),
     priceReductionPercent: record.PriceReductionPercent,
@@ -396,10 +520,25 @@ function mapToPropertyCardResponse(record) {
     mlsStatus: record.MlsStatus,
     transactionType: record.TransactionType,
     isNewListing: record.isNewListing || false,
+    // ⚠️ DEPRECATED: listingAge is no longer used for For Sale, For Lease, Sold, Leased, or Removed statuses.
+    // These statuses use specific timestamp fields with prefix text instead (e.g., "Listed – <date>", "Sold on – <date>").
+    // Kept for backward compatibility with other statuses only.
     listingAge: record.ListingAge,
-    listedAt: record.OriginalEntryTimestamp, // Frontend expects listedAt
-    originalEntryTimestamp: record.OriginalEntryTimestamp, // Keep for backward compatibility
+    listedAt: record.OriginalEntryTimestamp, // Frontend expects listedAt (formatted timestamp)
+    originalEntryTimestamp: record.OriginalEntryTimestamp, // Formatted timestamp: "10th Jun, 2025"
+    originalEntryTimestampRaw: record.OriginalEntryTimestampRaw, // Raw timestamp for filtering/comparison
     modificationTimestamp: record.ModificationTimestamp,
+    
+    // Status dates (for Sold and Leased properties, includes PurchaseContractDate)
+    // For Removed properties, includes all removal timestamp columns (COALESCE logic handled in frontend)
+    statusDates: {
+      purchaseContractDate: record.PurchaseContractDate, // Formatted date for Sold and Leased properties
+      suspendedDate: record.SuspendedDate,
+      terminatedDate: record.TerminatedDate,
+      expirationDate: record.ExpirationDate,
+      withdrawnDate: record.WithdrawnDate,
+      unavailableDate: record.UnavailableDate
+    },
     
     // Open house fields
     openHouseDisplay: record.OpenHouseDisplay,
@@ -536,13 +675,19 @@ function mapToPropertyDetailsResponse(property, rooms, media) {
       purchaseContractDate: property.PurchaseContractDate,
       suspendedDate: property.SuspendedDate,
       terminatedDate: property.TerminatedDate,
-      expirationDate: property.ExpirationDate
+      expirationDate: property.ExpirationDate,
+      withdrawnDate: property.WithdrawnDate,
+      unavailableDate: property.UnavailableDate
     },
     daysOnMarket: property.DaysOnMarket,
     isNewListing: property.isNewListing || false,
+    // ⚠️ DEPRECATED: listingAge is no longer used for For Sale, For Lease, Sold, Leased, or Removed statuses.
+    // These statuses use specific timestamp fields with prefix text instead (e.g., "Listed – <date>", "Sold – <date>").
+    // Kept for backward compatibility with other statuses only.
     listingAge: property.ListingAge,
-    listedAt: property.OriginalEntryTimestamp, // Frontend expects listedAt
-    originalEntryTimestamp: property.OriginalEntryTimestamp, // Keep for backward compatibility
+    listedAt: property.OriginalEntryTimestamp, // Frontend expects listedAt (formatted timestamp)
+    originalEntryTimestamp: property.OriginalEntryTimestamp, // Formatted timestamp: "10th Jun, 2025"
+    originalEntryTimestampRaw: property.OriginalEntryTimestampRaw, // Raw timestamp for filtering/comparison
     listDate: property.OriginalEntryTimestamp, // Keep for backward compatibility
     modificationTimestamp: property.ModificationTimestamp,
     
@@ -808,6 +953,16 @@ function mapToMapPopupResponse(record) {
     
     // Listing info
     listedAt: record.ListedAt || record.OriginalEntryTimestamp,
+    originalEntryTimestamp: record.OriginalEntryTimestamp, // Formatted timestamp: "10th Jun, 2025"
+    originalEntryTimestampRaw: record.OriginalEntryTimestampRaw, // Raw timestamp for filtering/comparison
+    statusDates: {
+      purchaseContractDate: record.PurchaseContractDate, // Formatted date for Sold and Leased properties
+      suspendedDate: record.SuspendedDate,
+      terminatedDate: record.TerminatedDate,
+      expirationDate: record.ExpirationDate,
+      withdrawnDate: record.WithdrawnDate,
+      unavailableDate: record.UnavailableDate
+    },
     
     // Property details
     bedroomsDisplay: record.BedroomsDisplay,

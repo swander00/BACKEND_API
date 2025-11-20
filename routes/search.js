@@ -52,6 +52,9 @@ router.get('/', async (req, res, next) => {
       cityRegion: s.CityRegion,
       status: s.Status,
       mlsStatus: s.MlsStatus,
+      // ⚠️ DEPRECATED: listingAge is no longer used for For Sale, For Lease, Sold, Leased, or Removed statuses.
+      // These statuses use specific timestamp fields with prefix text instead (e.g., "Listed – <date>", "Sold – <date>").
+      // Kept for backward compatibility with other statuses only.
       listingAge: s.ListingAge,
       listPrice: s.ListPrice,
       originalListPrice: s.OriginalListPrice,

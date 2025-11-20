@@ -127,11 +127,62 @@ The response includes properties matching the selected status according to the m
 
 ---
 
+## City Filter
+
+The City filter supports multi-select, allowing users to filter properties by one or more cities. When multiple cities are selected, the results include listings from all selected cities.
+
+### API Usage
+
+**Single City:**
+```
+GET /api/properties?city=Toronto
+GET /api/properties/map?city=Toronto
+```
+
+**Multiple Cities (comma-separated):**
+```
+GET /api/properties?city=Toronto,Mississauga,Brampton
+GET /api/properties/map?city=Toronto,Mississauga,Brampton
+```
+
+**Multiple Cities (repeated parameters):**
+```
+GET /api/properties?city=Toronto&city=Mississauga&city=Brampton
+GET /api/properties/map?city=Toronto&city=Mississauga&city=Brampton
+```
+
+### Implementation Details
+
+1. **Backend Parsing**: The backend uses `parseArrayParam()` which accepts:
+   - Comma-separated string: `city=Toronto,Mississauga`
+   - Array format: `city[]=Toronto&city[]=Mississauga` (Express automatically converts repeated params to array)
+   - Maximum 20 cities per request
+
+2. **Query Logic**: When multiple cities are provided, the backend uses SQL `IN` clause:
+   ```sql
+   City IN ('Toronto', 'Mississauga', 'Brampton')
+   ```
+
+3. **Supported Endpoints**:
+   - `/api/properties` - Main property listing endpoint
+   - `/api/properties/map` - Map popup properties endpoint
+
+4. **Validation**: 
+   - Maximum 20 cities per request
+   - Empty or invalid values are filtered out
+   - City names are trimmed of whitespace
+
+### Response
+
+The response includes properties matching any of the selected cities (OR logic).
+
+---
+
 ## Future Filters
 
 Additional filter documentation will be added to this file as filters are implemented:
 - Date Listed Filter
-- Primary Filters (City, Type, Price, Beds, Baths)
+- Primary Filters (Type, Price, Beds, Baths)
 - Advanced Filters
 - Quick Filters
 
