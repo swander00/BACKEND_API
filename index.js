@@ -103,19 +103,32 @@ app.use(requestLogger);
 
 // CORS - restrict to allowed origins (ALLOWED_ORIGINS comma-separated)
 // In development, allow localhost origins for easier testing
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+// Normalize: split by comma, trim whitespace, remove empty strings, handle potential encoding issues
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim().replace(/[\r\n\t]/g, '')) // Remove any hidden characters
+  .filter(Boolean)
+  .filter(s => s.length > 0);
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
 // Log CORS configuration on startup
 if (isDevelopment) {
   console.log('[CORS] Development mode: localhost origins allowed');
+  if (allowedOrigins.length > 0) {
+    console.log(`[CORS] Additional allowed origins:`, allowedOrigins);
+  }
 } else {
   if (allowedOrigins.length > 0) {
-    console.log(`[CORS] Production mode: ${allowedOrigins.length} allowed origin(s):`, allowedOrigins);
+    console.log(`[CORS] Production mode: ${allowedOrigins.length} allowed origin(s):`);
+    allowedOrigins.forEach((origin, idx) => {
+      console.log(`[CORS]   ${idx + 1}. "${origin}" (length: ${origin.length})`);
+    });
+    console.log(`[CORS] Raw env value: "${process.env.ALLOWED_ORIGINS || 'not set'}"`);
   } else {
     console.warn('[CORS] ⚠️  Production mode: NO ALLOWED_ORIGINS configured!');
     console.warn('[CORS] ⚠️  Set ALLOWED_ORIGINS environment variable in Railway to allow frontend requests.');
     console.warn('[CORS] ⚠️  Example: ALLOWED_ORIGINS=https://frontend-api-pi.vercel.app');
+    console.warn(`[CORS] ⚠️  Current env value: "${process.env.ALLOWED_ORIGINS || 'not set'}"`);
   }
 }
 
@@ -141,14 +154,24 @@ function setCorsHeaders(req, res) {
   if (localhostRegex.test(origin)) {
     isAllowed = true;
   } else if (allowedOrigins.length > 0) {
-    // Check against configured allowed origins
+    // Check against configured allowed origins (exact match)
     isAllowed = allowedOrigins.includes(origin);
+    
+    // Also try normalized comparison in case of encoding issues
+    if (!isAllowed) {
+      const normalizedOrigin = origin.trim();
+      isAllowed = allowedOrigins.some(allowed => allowed.trim() === normalizedOrigin);
+    }
   }
   // If no origins configured and not localhost, deny (isAllowed remains false)
   
   if (isAllowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+    // Log successful CORS match in production for debugging
+    if (!isDevelopment) {
+      logger.info('CORS: Origin allowed', { origin, path: req.path });
+    }
     return true; // CORS headers set
   }
   
@@ -156,9 +179,22 @@ function setCorsHeaders(req, res) {
   if (!isDevelopment && origin) {
     logger.warn('CORS: Origin not allowed', { 
       origin, 
+      originLength: origin.length,
       allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : 'none configured',
+      allowedOriginsCount: allowedOrigins.length,
+      rawEnvValue: process.env.ALLOWED_ORIGINS || 'not set',
       hint: 'Set ALLOWED_ORIGINS environment variable in Railway'
     });
+    
+    // Debug: Show exact comparison
+    console.error('[CORS DEBUG] Origin received:', JSON.stringify(origin));
+    console.error('[CORS DEBUG] Allowed origins:', JSON.stringify(allowedOrigins));
+    console.error('[CORS DEBUG] Exact match check:', allowedOrigins.map(o => ({
+      allowed: o,
+      received: origin,
+      match: o === origin,
+      lengths: { allowed: o.length, received: origin.length }
+    })));
   }
   
   return false; // Origin not allowed
