@@ -1,0 +1,63 @@
+name: Trigger Railway Backfill Sync
+
+on:
+  # Manual trigger from GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      sync_type:
+        description: 'Sync type (ALL, IDX, or VOW)'
+        required: true
+        default: 'ALL'
+        type: choice
+        options:
+          - ALL
+          - IDX
+          - VOW
+      reset:
+        description: 'Reset sync state and start from beginning'
+        required: false
+        default: false
+        type: boolean
+      limit:
+        description: 'Limit number of properties (leave empty for full sync)'
+        required: false
+        type: string
+  # Scheduled runs (optional - uncomment to enable)
+  # schedule:
+  #   - cron: '0 * * * *'  # Every hour
+  #   - cron: '0 2 * * *'  # Daily at 2 AM
+
+jobs:
+  trigger-sync:
+    runs-on: ubuntu-latest
+    name: Trigger Railway Sync
+    
+    steps:
+      - name: Trigger Sync via API
+        env:
+          RAILWAY_API_URL: ${{ secrets.RAILWAY_API_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          echo "🚀 Triggering sync: type=${{ github.event.inputs.sync_type || 'ALL' }}, reset=${{ github.event.inputs.reset || 'false' }}, limit=${{ github.event.inputs.limit || 'null' }}"
+          
+          # Build curl command with optional auth header
+          CURL_CMD="curl -X POST \"${RAILWAY_API_URL}/trigger-sync\" \
+            -H \"Content-Type: application/json\""
+          
+          # Add auth header if ADMIN_TOKEN is set
+          if [ -n "${ADMIN_TOKEN}" ]; then
+            CURL_CMD="${CURL_CMD} -H \"x-admin-token: ${ADMIN_TOKEN}\""
+          fi
+          
+          # Add request body
+          CURL_CMD="${CURL_CMD} -d '{
+            \"type\": \"${{ github.event.inputs.sync_type || 'ALL' }}\",
+            \"reset\": ${{ github.event.inputs.reset || 'false' }},
+            \"limit\": ${{ github.event.inputs.limit || 'null' }}
+          }' --fail-with-body"
+          
+          eval $CURL_CMD
+          
+          echo "✅ Sync triggered successfully!"
+          echo "📊 Check Railway logs to monitor progress"
+

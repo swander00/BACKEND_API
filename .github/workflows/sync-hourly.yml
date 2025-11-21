@@ -1,0 +1,38 @@
+name: Hourly Incremental Sync
+
+on:
+  # Run every hour
+  schedule:
+    - cron: '0 * * * *'  # At minute 0 of every hour
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  incremental-sync:
+    runs-on: ubuntu-latest
+    name: Hourly Incremental Sync
+    
+    steps:
+      - name: Trigger Incremental Sync via API
+        env:
+          RAILWAY_API_URL: ${{ secrets.RAILWAY_API_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          echo "🔄 Triggering hourly incremental sync..."
+          
+          # Build curl command with optional auth header
+          CURL_CMD="curl -X POST \"${RAILWAY_API_URL}/trigger-sync\" \
+            -H \"Content-Type: application/json\""
+          
+          # Add auth header if ADMIN_TOKEN is set
+          if [ -n "${ADMIN_TOKEN}" ]; then
+            CURL_CMD="${CURL_CMD} -H \"x-admin-token: ${ADMIN_TOKEN}\""
+          fi
+          
+          # Add request body
+          CURL_CMD="${CURL_CMD} -d '{\"type\": \"ALL\"}' --fail-with-body"
+          
+          eval $CURL_CMD
+          
+          echo "✅ Incremental sync triggered successfully!"
+
