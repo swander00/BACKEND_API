@@ -300,6 +300,55 @@ function applyPropertyCardFilters(query, filters) {
     query = query.eq('PropertyType', filters.propertyType);
   }
 
+  // Property class filter
+  // IMPORTANT: Multi-select must use OR logic (any of the selected classes)
+  // Use .in() for arrays to create: PropertyClass IN ('Residential Freehold', 'Residential Condo & Other', ...)
+  // Note: Frontend sends mapped values: 'Freehold only' → 'Residential Freehold', 'Condo only' → 'Residential Condo & Other'
+  // This filter is EXCLUSIVE: selecting 'Residential Freehold' will EXCLUDE 'Residential Condo & Other' and vice versa
+  logger.debug('PropertyClass filter check', { 
+    hasPropertyClass: !!filters.propertyClass,
+    isArray: Array.isArray(filters.propertyClass),
+    value: filters.propertyClass,
+    type: typeof filters.propertyClass
+  });
+  
+  if (filters.propertyClass && Array.isArray(filters.propertyClass) && filters.propertyClass.length > 0) {
+    // Filter to only show properties matching the selected property class(es)
+    // This excludes all other property classes
+    query = query.in('PropertyClass', filters.propertyClass);
+    logger.debug('PropertyClass filter applied (IN)', { 
+      propertyClasses: filters.propertyClass,
+      filterType: 'IN',
+      willExclude: 'All property classes not in the array'
+    });
+  } else if (filters.propertyClass) {
+    // Single value - use equality (shouldn't happen with parseMultiValueParam, but handle it)
+    query = query.eq('PropertyClass', filters.propertyClass);
+    logger.debug('PropertyClass filter applied (EQ)', { 
+      propertyClass: filters.propertyClass,
+      filterType: 'EQ'
+    });
+  } else {
+    logger.debug('PropertyClass filter NOT applied - no propertyClass in filters');
+  }
+
+  // Architectural style (house style) filter
+  // IMPORTANT: Multi-select must use OR logic (any of the selected styles)
+  // Frontend sends raw database values (mapped from display names)
+  if (filters.architecturalStyle && Array.isArray(filters.architecturalStyle) && filters.architecturalStyle.length > 0) {
+    query = query.in('ArchitecturalStyle', filters.architecturalStyle);
+    logger.debug('ArchitecturalStyle filter applied', { 
+      styles: filters.architecturalStyle,
+      count: filters.architecturalStyle.length
+    });
+  } else if (filters.architecturalStyle) {
+    // Single value - use equality
+    query = query.eq('ArchitecturalStyle', filters.architecturalStyle);
+    logger.debug('ArchitecturalStyle filter applied (single)', { 
+      style: filters.architecturalStyle
+    });
+  }
+
   // Price range
   // NOTE: Use ListPriceRaw (numeric) instead of ListPrice (formatted string)
   // For removed status, skip price filters as removed properties may not have prices
@@ -387,6 +436,275 @@ function applyPropertyCardFilters(query, filters) {
     // Supabase PostgREST doesn't support OR directly, so we'll filter client-side or use a different approach
     // For now, search on FullAddress (most common use case)
     query = query.ilike('FullAddress', searchTerm);
+  }
+
+  // Lot frontage (LotWidth)
+  // Frontend sends strings like "0-30 ft", "31-50 ft", "120+ ft", etc.
+  if (filters.lotFrontage) {
+    logger.debug('Lot frontage filter received', { 
+      lotFrontage: filters.lotFrontage,
+      type: typeof filters.lotFrontage
+    });
+    
+    // Remove "ft" suffix and trim whitespace
+    const cleaned = filters.lotFrontage.replace(/\s*ft\s*$/i, '').trim();
+    
+    // Check for range format: "0-30" or "31-50" or "81-120"
+    const rangeMatch = cleaned.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (rangeMatch) {
+      const minFrontage = parseInt(rangeMatch[1], 10);
+      const maxFrontage = parseInt(rangeMatch[2], 10);
+      // Explicitly exclude nulls and apply range filters
+      query = query.not('LotWidth', 'is', null)
+                    .gte('LotWidth', minFrontage)
+                    .lte('LotWidth', maxFrontage);
+      logger.debug('Lot frontage filter applied (range)', { 
+        lotFrontage: filters.lotFrontage,
+        cleaned,
+        minFrontage,
+        maxFrontage,
+        filter: `LotWidth IS NOT NULL AND LotWidth >= ${minFrontage} AND LotWidth <= ${maxFrontage}`
+      });
+    } 
+    // Check for "plus" format: "120+" or "200+"
+    else if (cleaned.endsWith('+')) {
+      const minFrontage = parseInt(cleaned.replace('+', ''), 10);
+      if (!isNaN(minFrontage)) {
+        query = query.not('LotWidth', 'is', null)
+                      .gte('LotWidth', minFrontage);
+        logger.debug('Lot frontage filter applied (plus)', { 
+          lotFrontage: filters.lotFrontage,
+          cleaned,
+          minFrontage,
+          filter: `LotWidth IS NOT NULL AND LotWidth >= ${minFrontage}`
+        });
+      }
+    }
+    // Single number format: "25"
+    else {
+      const numValue = parseInt(cleaned, 10);
+      if (!isNaN(numValue)) {
+        query = query.not('LotWidth', 'is', null)
+                      .gte('LotWidth', numValue);
+        logger.debug('Lot frontage filter applied (single)', { 
+          lotFrontage: filters.lotFrontage,
+          cleaned,
+          numValue,
+          filter: `LotWidth IS NOT NULL AND LotWidth >= ${numValue}`
+        });
+      } else {
+        logger.warn('Lot frontage filter could not parse value', { 
+          lotFrontage: filters.lotFrontage,
+          cleaned
+        });
+      }
+    }
+  }
+
+  // Lot depth (LotDepth)
+  // Frontend sends strings like "0-75 ft", "76-100 ft", "200+ ft", etc.
+  if (filters.lotDepth) {
+    logger.debug('Lot depth filter received', { 
+      lotDepth: filters.lotDepth,
+      type: typeof filters.lotDepth
+    });
+    
+    // Remove "ft" suffix and trim whitespace
+    const cleaned = filters.lotDepth.replace(/\s*ft\s*$/i, '').trim();
+    
+    // Check for range format: "0-75" or "76-100"
+    const rangeMatch = cleaned.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (rangeMatch) {
+      const minDepth = parseInt(rangeMatch[1], 10);
+      const maxDepth = parseInt(rangeMatch[2], 10);
+      // Explicitly exclude nulls and apply range filters
+      query = query.not('LotDepth', 'is', null)
+                    .gte('LotDepth', minDepth)
+                    .lte('LotDepth', maxDepth);
+      logger.debug('Lot depth filter applied (range)', { 
+        lotDepth: filters.lotDepth,
+        cleaned,
+        minDepth,
+        maxDepth,
+        filter: `LotDepth IS NOT NULL AND LotDepth >= ${minDepth} AND LotDepth <= ${maxDepth}`
+      });
+    } 
+    // Check for "plus" format: "200+"
+    else if (cleaned.endsWith('+')) {
+      const minDepth = parseInt(cleaned.replace('+', ''), 10);
+      if (!isNaN(minDepth)) {
+        query = query.not('LotDepth', 'is', null)
+                      .gte('LotDepth', minDepth);
+        logger.debug('Lot depth filter applied (plus)', { 
+          lotDepth: filters.lotDepth,
+          cleaned,
+          minDepth,
+          filter: `LotDepth IS NOT NULL AND LotDepth >= ${minDepth}`
+        });
+      }
+    }
+    // Single number format: "100"
+    else {
+      const numValue = parseInt(cleaned, 10);
+      if (!isNaN(numValue)) {
+        query = query.not('LotDepth', 'is', null)
+                      .gte('LotDepth', numValue);
+        logger.debug('Lot depth filter applied (single)', { 
+          lotDepth: filters.lotDepth,
+          cleaned,
+          numValue,
+          filter: `LotDepth IS NOT NULL AND LotDepth >= ${numValue}`
+        });
+      } else {
+        logger.warn('Lot depth filter could not parse value', { 
+          lotDepth: filters.lotDepth,
+          cleaned
+        });
+      }
+    }
+  }
+
+  // Maintenance fee (AssociationFee or AdditionalMonthlyFee)
+  // Filter on AssociationFee primarily (most common field)
+  // Note: For exact COALESCE behavior (use AssociationFee if available, else AdditionalMonthlyFee),
+  // we would need a database view or computed column. For now, filter on AssociationFee.
+  // If AdditionalMonthlyFee filtering is needed, it can be added as a separate filter.
+  if (filters.minMaintenanceFee !== undefined) {
+    query = query.gte('AssociationFee', filters.minMaintenanceFee);
+  }
+  if (filters.maxMaintenanceFee !== undefined) {
+    query = query.lte('AssociationFee', filters.maxMaintenanceFee);
+  }
+
+  // Property tax (TaxAnnualAmount)
+  // Explicitly exclude nulls when filtering (similar to lot depth/frontage)
+  if (filters.minPropertyTax !== undefined || filters.maxPropertyTax !== undefined) {
+    // Ensure values are numbers (parseNumber already returns numbers, but double-check)
+    const minTax = filters.minPropertyTax !== undefined && filters.minPropertyTax !== null 
+      ? parseFloat(filters.minPropertyTax) 
+      : undefined;
+    const maxTax = filters.maxPropertyTax !== undefined && filters.maxPropertyTax !== null 
+      ? parseFloat(filters.maxPropertyTax) 
+      : undefined;
+    
+    logger.info('Property tax filter received', {
+      minPropertyTax: filters.minPropertyTax,
+      maxPropertyTax: filters.maxPropertyTax,
+      minTax,
+      maxTax,
+      minTaxType: typeof minTax,
+      maxTaxType: typeof maxTax,
+      minTaxIsNaN: isNaN(minTax),
+      maxTaxIsNaN: isNaN(maxTax),
+    });
+    
+    // Exclude nulls - use same pattern as lot filters (this syntax works for other filters)
+    query = query.not('TaxAnnualAmount', 'is', null);
+    
+    if (minTax !== undefined && !isNaN(minTax) && isFinite(minTax)) {
+      query = query.gte('TaxAnnualAmount', minTax);
+      logger.info('Property tax filter applied (min)', {
+        minPropertyTax: filters.minPropertyTax,
+        minTax,
+        type: typeof minTax,
+        filter: `TaxAnnualAmount IS NOT NULL AND TaxAnnualAmount >= ${minTax}`
+      });
+    }
+    if (maxTax !== undefined && !isNaN(maxTax) && isFinite(maxTax)) {
+      query = query.lte('TaxAnnualAmount', maxTax);
+      logger.info('Property tax filter applied (max)', {
+        maxPropertyTax: filters.maxPropertyTax,
+        maxTax,
+        type: typeof maxTax,
+        filter: `TaxAnnualAmount IS NOT NULL AND TaxAnnualAmount <= ${maxTax}`
+      });
+    }
+  }
+
+  // Days on market (DaysOnMarket)
+  if (filters.minDaysOnMarket !== undefined) {
+    query = query.gte('DaysOnMarket', filters.minDaysOnMarket);
+  }
+  if (filters.maxDaysOnMarket !== undefined) {
+    query = query.lte('DaysOnMarket', filters.maxDaysOnMarket);
+  }
+
+  // Basement features (multi-select array)
+  // Maps frontend display values to database fields:
+  // "Apartment" -> BasementStatus contains apartment-related values
+  // "Finished" -> BasementStatus = 'Finished'
+  // "Walk-Out" -> BasementEntrance contains walk-out related values
+  // "Separate Entrance" -> BasementEntrance = 'Separate Entrance'
+  // "Kitchen: Yes" -> BasementKitchen = true
+  // "Kitchen: No" -> BasementKitchen = false
+  // "None" -> BasementStatus = 'None' or null
+  if (filters.basementFeatures && Array.isArray(filters.basementFeatures) && filters.basementFeatures.length > 0) {
+    const basementConditions = [];
+    
+    filters.basementFeatures.forEach((feature) => {
+      switch (feature) {
+        case 'Finished':
+          basementConditions.push('BasementStatus.eq.Finished');
+          break;
+        case 'Walk-Out':
+          basementConditions.push('BasementEntrance.ilike.%Walk-Out%');
+          break;
+        case 'Separate Entrance':
+          basementConditions.push('BasementEntrance.eq.Separate Entrance');
+          break;
+        case 'Kitchen: Yes':
+          basementConditions.push('BasementKitchen.eq.true');
+          break;
+        case 'Kitchen: No':
+          basementConditions.push('BasementKitchen.eq.false');
+          break;
+        case 'None':
+          basementConditions.push('BasementStatus.eq.None');
+          break;
+        case 'Apartment':
+          // Apartment typically means finished basement with separate entrance
+          basementConditions.push('BasementStatus.ilike.%Apartment%');
+          break;
+      }
+    });
+    
+    if (basementConditions.length > 0) {
+      // Use OR logic: any of the selected features should match
+      query = query.or(basementConditions.join(','));
+    }
+  }
+
+  // Property age (PropertyAge)
+  // Frontend sends string like "New", "0-5", "6-10", etc.
+  // PropertyAge column contains normalized exact values, so use exact matching
+  if (filters.propertyAge && filters.propertyAge !== null && filters.propertyAge !== '') {
+    logger.debug('Property age filter applied', { 
+      propertyAge: filters.propertyAge,
+      type: typeof filters.propertyAge,
+      filtersObject: JSON.stringify(filters)
+    });
+    query = query.eq('PropertyAge', filters.propertyAge);
+  }
+
+  // Swimming pool (PoolFeatures)
+  // PoolFeatures is stored as text/array - check if it exists and is not empty/null
+  if (filters.hasSwimmingPool === true) {
+    // Property has a pool - PoolFeatures should not be null/empty
+    query = query.not('PoolFeatures', 'is', null);
+  } else if (filters.hasSwimmingPool === false) {
+    // Property does not have a pool - filter for null or empty PoolFeatures
+    // Note: Supabase doesn't easily support "is null OR equals empty" in one query
+    // For now, filter for null (most common case for no pool)
+    query = query.is('PoolFeatures', null);
+  }
+
+  // Waterfront (WaterfrontYN)
+  // WaterfrontYN is typically 'Y' for yes, null or other values for no
+  if (filters.waterfront === true) {
+    query = query.eq('WaterfrontYN', 'Y');
+  } else if (filters.waterfront === false) {
+    // Not waterfront - WaterfrontYN is not 'Y' (could be null, 'N', or empty)
+    query = query.neq('WaterfrontYN', 'Y');
   }
 
   // Date filter - apply based on status-specific column

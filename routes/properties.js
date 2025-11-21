@@ -179,6 +179,8 @@ router.get('/', async (req, res, next) => {
     const filters = {
       city: parseMultiValueParam('city'),
       propertyType: parseMultiValueParam('propertyType'),
+      propertyClass: parseMultiValueParam('propertyClass'),
+      architecturalStyle: parseMultiValueParam('architecturalStyle'),
       minPrice: parseNumber(req.query.minPrice, 0, 100000000, 'minPrice'),
       maxPrice: parseNumber(req.query.maxPrice, 0, 100000000, 'maxPrice'),
       minBedrooms: parseNumber(req.query.minBedrooms, 0, 20, 'minBedrooms'),
@@ -193,9 +195,32 @@ router.get('/', async (req, res, next) => {
         : null, // ISO date string (YYYY-MM-DD) or null
       hasOpenHouse: parseBoolean(req.query.hasOpenHouse),
       hasVirtualTour: parseBoolean(req.query.hasVirtualTour),
-      minGarageSpaces: parseNumber(req.query.minGarageSpaces, 0, 20, 'minGarageSpaces'),
-      minTotalParking: parseNumber(req.query.minTotalParking, 0, 20, 'minTotalParking'),
-      searchTerm: validateSearchTerm(req.query.searchTerm, 80)
+      minGarageSpaces: parseNumber(req.query.minGarageSpaces, 0, 6, 'minGarageSpaces'),
+      minTotalParking: parseNumber(req.query.minTotalParking, 0, null, 'minTotalParking'),
+      searchTerm: validateSearchTerm(req.query.searchTerm, 80),
+      // New advanced filters
+      lotFrontage: req.query.lotFrontage && req.query.lotFrontage !== 'null' && req.query.lotFrontage !== '' 
+        ? req.query.lotFrontage 
+        : null,
+      lotDepth: req.query.lotDepth && req.query.lotDepth !== 'null' && req.query.lotDepth !== '' 
+        ? req.query.lotDepth 
+        : null,
+      minMaintenanceFee: parseNumber(req.query.minMaintenanceFee, 0, 10000, 'minMaintenanceFee'),
+      maxMaintenanceFee: parseNumber(req.query.maxMaintenanceFee, 0, 10000, 'maxMaintenanceFee'),
+      minPropertyTax: parseNumber(req.query.minPropertyTax, 0, 100000, 'minPropertyTax'),
+      maxPropertyTax: parseNumber(req.query.maxPropertyTax, 0, 100000, 'maxPropertyTax'),
+      minDaysOnMarket: parseNumber(req.query.minDaysOnMarket, 0, 1000, 'minDaysOnMarket'),
+      maxDaysOnMarket: parseNumber(req.query.maxDaysOnMarket, 0, 1000, 'maxDaysOnMarket'),
+      basementFeatures: parseMultiValueParam('basementFeatures'),
+      propertyAge: req.query.propertyAge && req.query.propertyAge !== 'null' && req.query.propertyAge !== '' 
+        ? req.query.propertyAge 
+        : null,
+      hasSwimmingPool: req.query.hasSwimmingPool !== undefined 
+        ? parseBoolean(req.query.hasSwimmingPool) 
+        : undefined,
+      waterfront: req.query.waterfront !== undefined 
+        ? parseBoolean(req.query.waterfront) 
+        : undefined
     };
     
     // Debug logging for city filter (multi-select)
@@ -219,6 +244,27 @@ router.get('/', async (req, res, next) => {
         isArray: Array.isArray(filters.propertyType),
         arrayLength: Array.isArray(filters.propertyType) ? filters.propertyType.length : 0
       });
+    }
+    
+    // Debug logging for propertyClass filter
+    if (req.query.propertyClass || filters.propertyClass) {
+      logger.debug('PropertyClass filter received', { 
+        requestId: req.id,
+        rawPropertyClass: req.query.propertyClass,
+        parsedPropertyClass: filters.propertyClass,
+        isArray: Array.isArray(filters.propertyClass),
+        arrayLength: Array.isArray(filters.propertyClass) ? filters.propertyClass.length : 0,
+        values: filters.propertyClass,
+        queryString: req.originalUrl || req.url
+      });
+      console.log('[routes/properties] PropertyClass filter DEBUG:', {
+        raw: req.query.propertyClass,
+        parsed: filters.propertyClass,
+        isArray: Array.isArray(filters.propertyClass),
+        url: req.originalUrl || req.url
+      });
+    } else {
+      console.log('[routes/properties] No PropertyClass filter in request');
     }
 
     // Debug logging for status filter
@@ -254,6 +300,17 @@ router.get('/', async (req, res, next) => {
       }
     } else {
       console.log('[routes/properties] Skipping cache for removed status (to avoid stale empty results)');
+    }
+
+    // Debug logging for lot filters
+    if (filters.lotFrontage || filters.lotDepth) {
+      logger.debug('Lot filters received in route', { 
+        requestId: req.id,
+        lotFrontage: filters.lotFrontage,
+        lotDepth: filters.lotDepth,
+        rawLotFrontage: req.query.lotFrontage,
+        rawLotDepth: req.query.lotDepth
+      });
     }
 
     // Query PropertyView
