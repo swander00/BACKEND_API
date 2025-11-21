@@ -70,8 +70,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_psv_listingkey
   ON public."PropertySuggestionView" ("ListingKey");
 
 -- Create indexes for search performance
--- Note: ILIKE searches work with regular indexes, but trigram indexes (pg_trgm) provide better performance
--- If pg_trgm extension is available, you can use: USING gin ("FullAddress" gin_trgm_ops)
+-- Regular B-tree indexes for exact/range queries
 CREATE INDEX IF NOT EXISTS idx_psv_fulladdress
   ON public."PropertySuggestionView" ("FullAddress");
 
@@ -80,6 +79,18 @@ CREATE INDEX IF NOT EXISTS idx_psv_city
 
 CREATE INDEX IF NOT EXISTS idx_psv_mlsnumber
   ON public."PropertySuggestionView" ("MLSNumber");
+
+-- Trigram indexes (GIN) for fuzzy search performance
+-- These indexes enable fast similarity() queries using pg_trgm extension
+-- Note: pg_trgm extension must be enabled (already enabled in schema.sql)
+CREATE INDEX IF NOT EXISTS idx_psv_fulladdress_trgm 
+  ON public."PropertySuggestionView" USING gin ("FullAddress" gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_psv_city_trgm 
+  ON public."PropertySuggestionView" USING gin ("City" gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_psv_mlsnumber_trgm 
+  ON public."PropertySuggestionView" USING gin ("MLSNumber" gin_trgm_ops);
 
 -- Refresh the view
 REFRESH MATERIALIZED VIEW public."PropertySuggestionView";

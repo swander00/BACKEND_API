@@ -854,7 +854,8 @@ export async function queryPropertyMedia(listingKey) {
 // ===============================================================================================
 
 /**
- * Search for property suggestions (autocomplete)
+ * Search for property suggestions (autocomplete) using fuzzy search
+ * Uses PostgreSQL trigram similarity for fuzzy matching on addresses, cities, and MLS numbers
  * @param {string} searchTerm
  * @param {number} limit
  * @returns {Promise<Array>}
@@ -866,7 +867,57 @@ export async function queryPropertySuggestions(searchTerm, limit = 10) {
     return [];
   }
 
-  const term = `%${searchTerm.toLowerCase().trim()}%`;
+  const trimmedTerm = searchTerm.trim();
+  
+  try {
+    // Use PostgreSQL function for fuzzy search with trigram similarity
+    // This provides better fuzzy matching than simple ILIKE queries
+    const { data, error } = await db.rpc('search_property_suggestions', {
+      search_term: trimmedTerm,
+      result_limit: limit
+    });
+
+    if (error) {
+      // Fallback to ILIKE if RPC function doesn't exist (for backward compatibility)
+      logger.warn('Fuzzy search RPC function not available, falling back to ILIKE', {
+        error: error.message,
+        searchTerm: trimmedTerm
+      });
+      
+      return await queryPropertySuggestionsFallback(trimmedTerm, limit);
+    }
+
+    // Remove similarity_score from results (it's only for sorting)
+    const results = (data || []).map(({ similarity_score, ...rest }) => rest);
+    
+    logger.debug('Fuzzy search completed', {
+      searchTerm: trimmedTerm,
+      resultCount: results.length,
+      usedFuzzySearch: true
+    });
+
+    return results;
+  } catch (error) {
+    // Fallback to ILIKE if RPC call fails
+    logger.warn('Fuzzy search failed, falling back to ILIKE', {
+      error: error.message,
+      searchTerm: trimmedTerm
+    });
+    
+    return await queryPropertySuggestionsFallback(trimmedTerm, limit);
+  }
+}
+
+/**
+ * Fallback search using ILIKE (substring matching)
+ * Used when fuzzy search function is not available
+ * @param {string} searchTerm
+ * @param {number} limit
+ * @returns {Promise<Array>}
+ */
+async function queryPropertySuggestionsFallback(searchTerm, limit = 10) {
+  const db = initDB();
+  const term = `%${searchTerm.toLowerCase()}%`;
   
   // Query multiple fields - Supabase PostgREST limitation: do separate queries or use text search
   // For now, search on FullAddress and City separately, then combine
@@ -891,6 +942,12 @@ export async function queryPropertySuggestions(searchTerm, limit = 10) {
   if (firstError) {
     throw new DatabaseError(`PropertySuggestionView query failed: ${firstError.message}`, firstError);
   }
+
+  logger.debug('ILIKE fallback search completed', {
+    searchTerm,
+    resultCount: uniqueResults.length,
+    usedFuzzySearch: false
+  });
 
   return uniqueResults;
 }
