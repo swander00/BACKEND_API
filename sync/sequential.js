@@ -37,7 +37,7 @@ export async function runSequentialSync(options = {}) {
     reset = false
   } = options;
 
-  Logger.info(`Starting ${syncType} sync${limit ? ` (limit: ${limit})` : ''}${reset ? ' (RESET MODE)' : ''}`);
+  console.log(`\n🚀 Starting ${syncType} sync${limit ? ` (limit: ${limit.toLocaleString()})` : ''}${reset ? ' (RESET MODE)' : ''}`);
 
   try {
     // [2.1] Load or initialize sync state
@@ -53,7 +53,7 @@ export async function runSequentialSync(options = {}) {
       await updateSyncState(state);
     }
 
-    Logger.info(`Resuming from: ${state.LastTimestamp} | Key: ${state.LastKey}`);
+    console.log(`📍 Resuming from: ${state.LastTimestamp} | Key: ${state.LastKey}`);
     // [2.1] End
 
     // [2.2] Set status to running and track start time
@@ -64,12 +64,19 @@ export async function runSequentialSync(options = {}) {
       Status: 'running',
       LastRunStarted: new Date().toISOString()
     });
-    Logger.info(`Status set to RUNNING`);
+    // Status set to RUNNING (silent)
     // [2.2] End
 
     // [2.3] Fetch total count for progress tracking
     const totalCount = await fetchPropertyCount(syncType, state.LastTimestamp, state.LastKey);
-    Logger.info(`Total records available: ${totalCount.toLocaleString()}`);
+    console.log(`📊 Total records available: ${totalCount.toLocaleString()}\n`);
+    
+    // Initialize progress state
+    if (Logger._progressState) {
+      Logger._progressState.startTime = Date.now();
+      Logger._progressState.lastUpdate = Date.now();
+      Logger._progressState.lastCount = 0;
+    }
     // [2.3] End
 
     // [2.4] Run sync loop
@@ -78,7 +85,8 @@ export async function runSequentialSync(options = {}) {
 
     // [2.5] Mark sync as completed
     await completeSyncState(syncType, processedCount);
-    Logger.success(`${syncType} sync completed successfully - ${processedCount.toLocaleString()} properties processed`);
+    console.log(`\n✅ ${syncType} sync completed successfully!`);
+    console.log(`   Processed: ${processedCount.toLocaleString()} properties`);
     // [2.5] End
 
   } catch (error) {
@@ -115,6 +123,14 @@ async function syncLoop(syncType, state, totalCount, limit) {
 
   // [3.2] Main sync loop - continue until no more records
   while (true) {
+    // [3.2.0] Check for shutdown signal
+    if (process.env.SYNC_SHUTDOWN === 'true') {
+      console.log('\n⚠️  Shutdown signal detected - stopping sync gracefully');
+      console.log(`💾 Progress saved: ${processedCount.toLocaleString()} properties processed`);
+      break;
+    }
+    // [3.2.0] End
+    
     // [3.2.1] Check limit condition
     if (limit && processedCount >= limit) {
       Logger.info(`Reached limit of ${limit} properties`);
@@ -155,19 +171,18 @@ async function syncLoop(syncType, state, totalCount, limit) {
       state.LastTimestamp = rawProperty.ModificationTimestamp;
       state.LastKey = rawProperty.ListingKey;
 
-      // Log progress
-      Logger.progress(
-        processedCount,
-        totalCount,
-        rawProperty.ListingKey,
-        syncType,
-        childCounts
-      );
+      // Log progress (human-readable format)
+      Logger.progress(processedCount, {
+        total: totalCount,
+        listingKey: rawProperty.ListingKey,
+        syncType: syncType,
+        childCounts: childCounts
+      });
 
       // Checkpoint state periodically
       if (processedCount % CHECKPOINT_INTERVAL === 0) {
         await updateSyncState(state);
-        Logger.info(`Checkpoint saved at ${processedCount.toLocaleString()} properties`);
+        console.log(`\n💾 Checkpoint saved at ${processedCount.toLocaleString()} properties`);
       }
 
       // Coverage report

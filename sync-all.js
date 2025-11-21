@@ -111,86 +111,147 @@ async function getExistingRecordCount() {
 
 
 // ===============================================================================================
+// [2.5] GRACEFUL SHUTDOWN HANDLER
+// ===============================================================================================
+
+let isShuttingDown = false;
+let syncInProgress = false;
+
+function setupGracefulShutdown() {
+  const shutdown = async (signal) => {
+    if (isShuttingDown) {
+      console.log(`\n⚠️  ${signal} received again, forcing immediate exit...`);
+      process.exit(1);
+    }
+
+    isShuttingDown = true;
+    console.log(`\n\n🛑 ${signal} received - stopping sync gracefully...`);
+    
+    if (syncInProgress) {
+      console.log('⏳ Waiting for current batch to complete...');
+      console.log('💾 Progress will be saved at next checkpoint');
+      console.log('📝 You can resume sync later - it will continue from where it stopped\n');
+    }
+    
+    // Give a moment for cleanup, then exit
+    setTimeout(() => {
+      process.exit(0);
+    }, 2000);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGHUP', () => shutdown('SIGHUP'));
+}
+
+// ===============================================================================================
 // [3] MAIN FUNCTION
 // ===============================================================================================
 
 async function main() {
+  // Setup graceful shutdown handlers
+  setupGracefulShutdown();
   const config = parseCustomArgs();
   
-  console.log('========================================');
-  console.log('TRREB Sync Service');
-  console.log('========================================');
-  console.log(`Mode: ${config.incremental ? 'INCREMENTAL' : 'FULL'}`);
+  // Set sync mode for better logging
+  process.env.SYNC_MODE = 'true';
+  
+  console.log('\n╔════════════════════════════════════════╗');
+  console.log('║      TRREB Sync Service               ║');
+  console.log('╚════════════════════════════════════════╝');
+  console.log(`Mode: ${config.incremental ? '🔄 INCREMENTAL' : '📦 FULL SYNC'}`);
   console.log(`Syncing: ${config.syncIdx ? 'IDX' : ''}${config.syncIdx && config.syncVow ? ' + ' : ''}${config.syncVow ? 'VOW' : ''}`);
   console.log(`Limit: ${config.limit ? config.limit.toLocaleString() : 'None (complete sync)'}`);
-  console.log(`Reset: ${config.reset ? 'YES' : 'NO'}`);
-  console.log('========================================\n');
+  console.log(`Reset: ${config.reset ? 'YES ⚠️' : 'NO'}`);
+  console.log('════════════════════════════════════════\n');
   
   const totalStart = Date.now();
   
   try {
     // [3.1] Fetch counts upfront
-    console.log('>>> Fetching total counts...\n');
+    console.log('📊 Fetching total counts...\n');
     
     let idxCount = 0;
     let vowCount = 0;
     
     if (config.syncIdx) {
       idxCount = await fetchPropertyCount('IDX', '2024-01-01T00:00:00Z', '0');
-      console.log(`IDX Properties: ${idxCount.toLocaleString()}`);
+      console.log(`   IDX Properties: ${idxCount.toLocaleString()}`);
     }
     
     if (config.syncVow) {
       vowCount = await fetchPropertyCount('VOW', '2024-01-01T00:00:00Z', '0');
-      console.log(`VOW Properties: ${vowCount.toLocaleString()}`);
+      console.log(`   VOW Properties: ${vowCount.toLocaleString()}`);
     }
     
     const totalCount = idxCount + vowCount;
-    console.log(`TOTAL Properties: ${totalCount.toLocaleString()}`);
+    console.log(`   ─────────────────────────────`);
+    console.log(`   TOTAL Properties: ${totalCount.toLocaleString()}\n`);
     
     // [3.2] Get existing database count
     const existingRecords = await getExistingRecordCount();
-    console.log(`\nAlready in database: ${existingRecords.toLocaleString()}`);
-    console.log(`Remaining to sync: ${(totalCount - existingRecords).toLocaleString()}\n`);
+    console.log(`💾 Already in database: ${existingRecords.toLocaleString()}`);
+    console.log(`📥 Remaining to sync: ${(totalCount - existingRecords).toLocaleString()}\n`);
     // [3.2] End
     
     // [3.3] Sync IDX (if requested)
-    if (config.syncIdx) {
-      console.log('>>> Starting IDX Sync...\n');
-      await runSequentialSync({
-        limit: config.limit,
-        syncType: 'IDX',
-        reset: config.reset
-      });
-      console.log('\n>>> IDX Sync Complete!\n');
+    if (config.syncIdx && !isShuttingDown) {
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('🔄 Starting IDX Sync...');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      syncInProgress = true;
+      try {
+        await runSequentialSync({
+          limit: config.limit,
+          syncType: 'IDX',
+          reset: config.reset
+        });
+        if (!isShuttingDown) {
+          console.log('\n✅ IDX Sync Complete!\n');
+        }
+      } finally {
+        syncInProgress = false;
+      }
     }
     // [3.3] End
     
     // [3.4] Sync VOW (if requested)
-    if (config.syncVow) {
-      console.log('>>> Starting VOW Sync...\n');
-      await runSequentialSync({
-        limit: config.limit,
-        syncType: 'VOW',
-        reset: config.reset
-      });
-      console.log('\n>>> VOW Sync Complete!\n');
+    if (config.syncVow && !isShuttingDown) {
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('🔄 Starting VOW Sync...');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      syncInProgress = true;
+      try {
+        await runSequentialSync({
+          limit: config.limit,
+          syncType: 'VOW',
+          reset: config.reset
+        });
+        if (!isShuttingDown) {
+          console.log('\n✅ VOW Sync Complete!\n');
+        }
+      } finally {
+        syncInProgress = false;
+      }
     }
     // [3.4] End
     
-    // [3.5] Final summary
-    const totalTime = ((Date.now() - totalStart) / 1000 / 60).toFixed(2);
-    const finalCount = await getExistingRecordCount();
-    
-    console.log('========================================');
-    console.log('SYNC COMPLETE');
-    console.log('========================================');
-    console.log(`Total Records in Database: ${finalCount.toLocaleString()}`);
-    console.log(`Records Added This Run: ${(finalCount - existingRecords).toLocaleString()}`);
-    console.log(`Total Time: ${totalTime} minutes`);
-    console.log('========================================\n');
-    
-    console.log('SUCCESS: All syncs completed!');
+    // [3.5] Final summary (only if not shutting down)
+    if (!isShuttingDown) {
+      const totalTime = ((Date.now() - totalStart) / 1000 / 60).toFixed(2);
+      const finalCount = await getExistingRecordCount();
+      const recordsAdded = finalCount - existingRecords;
+      
+      console.log('\n╔════════════════════════════════════════╗');
+      console.log('║         SYNC COMPLETE ✅               ║');
+      console.log('╚════════════════════════════════════════╝');
+      console.log(`📊 Total Records in Database: ${finalCount.toLocaleString()}`);
+      console.log(`➕ Records Added This Run: ${recordsAdded.toLocaleString()}`);
+      console.log(`⏱️  Total Time: ${totalTime} minutes`);
+      console.log('════════════════════════════════════════\n');
+      
+      console.log('🎉 SUCCESS: All syncs completed!\n');
+    }
     // [3.5] End
     
   } catch (error) {

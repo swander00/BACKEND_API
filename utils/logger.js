@@ -23,16 +23,22 @@ function formatLog(level, message, meta = {}) {
     ...meta
   };
 
-  if (isDevelopment) {
-    // Pretty print in development
-    console.log(`[${timestamp}] [${level}] ${message}`, Object.keys(meta).length > 0 ? meta : '');
+  // Check if we're in sync mode (detected by SYNC_MODE env var or if running sync scripts)
+  const isSyncMode = process.env.SYNC_MODE === 'true' || 
+                     process.argv[1]?.includes('sync-all.js') || 
+                     process.argv[1]?.includes('sequential.js');
+
+  if (isDevelopment || isSyncMode) {
+    // Pretty print in development or sync mode
+    const emoji = level === 'ERROR' ? '❌' : level === 'WARN' ? '⚠️' : level === 'SUCCESS' ? '✅' : level === 'INFO' ? 'ℹ️' : '';
+    console.log(`${emoji} [${level}] ${message}`, Object.keys(meta).length > 0 ? meta : '');
   } else {
     // JSON format for production (easier to parse)
     console.log(JSON.stringify(logEntry));
   }
 }
 
-export const logger = {
+const exportedLogger = {
   error: (message, meta = {}) => {
     if (currentLogLevel >= LOG_LEVELS.ERROR) {
       formatLog('ERROR', message, meta);
@@ -66,13 +72,75 @@ export const logger = {
 
   progress: (message, meta = {}) => {
     if (currentLogLevel >= LOG_LEVELS.INFO) {
-      formatLog('PROGRESS', message, meta);
+      // Handle sync progress format: Logger.progress(current, total, listingKey, syncType, childCounts)
+      if (typeof message === 'number' && meta && typeof meta === 'object' && meta.total !== undefined) {
+        // This is a sync progress call - format it nicely
+        const current = message;
+        const total = meta.total;
+        const listingKey = meta.listingKey || '';
+        const syncType = meta.syncType || 'SYNC';
+        const childCounts = meta.childCounts || {};
+        
+        const percent = total > 0 ? ((current / total) * 100).toFixed(1) : '0.0';
+        const barLength = 30;
+        const filled = Math.round((current / total) * barLength);
+        const bar = '█'.repeat(filled) + '░'.repeat(barLength - filled);
+        
+        // Calculate rate and ETA
+        const now = Date.now();
+        if (!exportedLogger._progressState) {
+          exportedLogger._progressState = { startTime: now, lastUpdate: now, lastCount: 0 };
+        }
+        const state = exportedLogger._progressState;
+        
+        const elapsed = (now - state.startTime) / 1000; // seconds
+        const rate = elapsed > 0 ? (current / elapsed).toFixed(1) : '0';
+        const remaining = total - current;
+        const etaSeconds = rate > 0 ? Math.round(remaining / parseFloat(rate)) : 0;
+        const etaMinutes = Math.floor(etaSeconds / 60);
+        const etaHours = Math.floor(etaMinutes / 60);
+        const etaStr = etaHours > 0 
+          ? `${etaHours}h ${etaMinutes % 60}m`
+          : etaMinutes > 0 
+          ? `${etaMinutes}m ${etaSeconds % 60}s`
+          : `${etaSeconds}s`;
+
+        // Update every 10 items or every 5 seconds
+        const timeSinceLastUpdate = (now - state.lastUpdate) / 1000;
+        if (current % 10 === 0 || timeSinceLastUpdate >= 5 || current === total) {
+          const childInfo = [];
+          if (childCounts.media !== undefined) childInfo.push(`Media: ${childCounts.media}`);
+          if (childCounts.rooms !== undefined) childInfo.push(`Rooms: ${childCounts.rooms}`);
+          if (childCounts.openHouse !== undefined) childInfo.push(`OpenHouse: ${childCounts.openHouse}`);
+          
+          const childStr = childInfo.length > 0 ? ` | ${childInfo.join(', ')}` : '';
+          
+          // Use \r to overwrite the same line
+          process.stdout.write(
+            `\r[${syncType}] ${bar} ${percent}% | ${current.toLocaleString()}/${total.toLocaleString()} | ` +
+            `Rate: ${rate}/s | ETA: ${etaStr}${childStr}        `
+          );
+          
+          if (current === total) {
+            process.stdout.write('\n'); // New line when complete
+          }
+          
+          state.lastUpdate = now;
+          state.lastCount = current;
+        }
+      } else {
+        // Regular progress log
+        formatLog('PROGRESS', message, meta);
+      }
     }
   }
 };
 
+// Export logger
+export const logger = exportedLogger;
+
 // Export Logger as alias for backward compatibility
-export const Logger = logger;
+export const Logger = exportedLogger;
 
 /**
  * Request logging middleware with request IDs
