@@ -22,6 +22,7 @@
     "test:openai": "node scripts/test-openai.js",
     "verify:parking": "node scripts/verify-parking-columns.js",
     "geocode": "node scripts/geocode-properties.js",
+    "check:cors": "node scripts/check-cors-config.js",
     "build": "echo 'No build step required'",
     "refresh:mvs": "node scripts/refresh-mvs.js",
     "reload:schema": "node scripts/reload-postgrest-schema.js",

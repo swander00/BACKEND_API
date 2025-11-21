@@ -106,6 +106,19 @@ app.use(requestLogger);
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
+// Log CORS configuration on startup
+if (isDevelopment) {
+  console.log('[CORS] Development mode: localhost origins allowed');
+} else {
+  if (allowedOrigins.length > 0) {
+    console.log(`[CORS] Production mode: ${allowedOrigins.length} allowed origin(s):`, allowedOrigins);
+  } else {
+    console.warn('[CORS] ⚠️  Production mode: NO ALLOWED_ORIGINS configured!');
+    console.warn('[CORS] ⚠️  Set ALLOWED_ORIGINS environment variable in Railway to allow frontend requests.');
+    console.warn('[CORS] ⚠️  Example: ALLOWED_ORIGINS=https://frontend-api-pi.vercel.app');
+  }
+}
+
 // Helper function to set CORS headers
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin;
