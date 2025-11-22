@@ -2,7 +2,10 @@
 -- FUZZY SEARCH FUNCTION
 -- =====================================================
 -- PostgreSQL function for fuzzy property search using trigram similarity
--- This enables fuzzy matching on addresses, cities, and MLS numbers
+-- Searches in priority order:
+-- 1. Address fields: MLSNumber, UnitNumber, StreetNumber, StreetName, City, Community
+-- 2. PublicRemarks (if no address matches)
+-- 3. Features: PropertyFeatures, InteriorFeatures, ExteriorFeatures (if no address/remarks matches)
 -- =====================================================
 -- 
 -- PREREQUISITES:
@@ -54,107 +57,204 @@ STABLE
 AS $$
 DECLARE
   normalized_term text;
-  similarity_threshold real := 0.2; -- Minimum similarity threshold (0.0 to 1.0)
+  address_similarity_threshold real := 0.2; -- Minimum similarity for address fields
+  remarks_similarity_threshold real := 0.15; -- Lower threshold for PublicRemarks
+  features_similarity_threshold real := 0.15; -- Lower threshold for Features
 BEGIN
   -- Normalize search term: lowercase and trim
   normalized_term := lower(trim(search_term));
   
-  -- If search term is too short, use ILIKE instead of similarity
+  -- If search term is too short, return empty
   IF length(normalized_term) < 2 THEN
     RETURN;
   END IF;
   
   -- Use trigram similarity for fuzzy matching
-  -- Search across FullAddress, City, and MLSNumber fields
-  -- Order by similarity score (highest first)
+  -- Priority: Address fields > PublicRemarks > Features
   RETURN QUERY
+  WITH scored_results AS (
+    SELECT 
+      psv."ListingKey",
+      psv."MLSNumber",
+      psv."FullAddress",
+      psv."City",
+      psv."StateOrProvince",
+      psv."CityRegion",
+      psv."PostalCode",
+      psv."MlsStatus",
+      psv."Status",
+      psv."ListingAge",
+      psv."ListPrice",
+      psv."OriginalListPrice",
+      psv."IsPriceReduced",
+      psv."PriceReductionAmount",
+      psv."PriceReductionPercent",
+      psv."ReductionNumber",
+      psv."BedroomsAboveGrade",
+      psv."BedroomsBelowGrade",
+      psv."BathroomsTotalInteger",
+      psv."LivingAreaMin",
+      psv."LivingAreaMax",
+      psv."PropertySubType",
+      psv."PrimaryImageUrl",
+      -- Calculate similarity scores for all address fields
+      similarity(lower(COALESCE(psv."MLSNumber", '')), normalized_term) AS mls_sim,
+      similarity(lower(COALESCE(psv."UnitNumber", '')), normalized_term) AS unit_sim,
+      similarity(lower(COALESCE(psv."StreetNumberText", COALESCE(psv."StreetNumber"::text, ''))), normalized_term) AS streetnum_sim,
+      similarity(lower(COALESCE(psv."StreetName", '')), normalized_term) AS streetname_sim,
+      similarity(lower(COALESCE(psv."City", '')), normalized_term) AS city_sim,
+      similarity(lower(COALESCE(psv."Community", '')), normalized_term) AS community_sim,
+      similarity(lower(COALESCE(psv."FullAddress", '')), normalized_term) AS fulladdress_sim,
+      -- Calculate similarity for PublicRemarks (lower priority)
+      similarity(lower(COALESCE(psv."PublicRemarks", '')), normalized_term) AS remarks_sim,
+      -- Calculate similarity for Features (lowest priority)
+      GREATEST(
+        similarity(lower(COALESCE(psv."PropertyFeatures", '')), normalized_term),
+        similarity(lower(COALESCE(psv."InteriorFeatures", '')), normalized_term),
+        similarity(lower(COALESCE(psv."ExteriorFeatures", '')), normalized_term)
+      ) AS features_sim,
+      -- Determine match type for priority ordering
+      CASE
+        -- Exact matches in address fields (highest priority: 1-6)
+        WHEN lower(COALESCE(psv."MLSNumber", '')) = normalized_term THEN 1
+        WHEN lower(COALESCE(psv."UnitNumber", '')) = normalized_term THEN 2
+        WHEN lower(COALESCE(psv."StreetNumberText", COALESCE(psv."StreetNumber"::text, ''))) = normalized_term THEN 3
+        WHEN lower(COALESCE(psv."StreetName", '')) = normalized_term THEN 4
+        WHEN lower(COALESCE(psv."City", '')) = normalized_term THEN 5
+        WHEN lower(COALESCE(psv."Community", '')) = normalized_term THEN 6
+        WHEN lower(COALESCE(psv."FullAddress", '')) = normalized_term THEN 7
+        -- Prefix matches in address fields (high priority: 8-14)
+        WHEN lower(COALESCE(psv."MLSNumber", '')) LIKE normalized_term || '%' THEN 8
+        WHEN lower(COALESCE(psv."UnitNumber", '')) LIKE normalized_term || '%' THEN 9
+        WHEN lower(COALESCE(psv."StreetNumberText", COALESCE(psv."StreetNumber"::text, ''))) LIKE normalized_term || '%' THEN 10
+        WHEN lower(COALESCE(psv."StreetName", '')) LIKE normalized_term || '%' THEN 11
+        WHEN lower(COALESCE(psv."City", '')) LIKE normalized_term || '%' THEN 12
+        WHEN lower(COALESCE(psv."Community", '')) LIKE normalized_term || '%' THEN 13
+        WHEN lower(COALESCE(psv."FullAddress", '')) LIKE normalized_term || '%' THEN 14
+        -- Fuzzy matches in address fields (medium priority: 15)
+        WHEN GREATEST(
+          similarity(lower(COALESCE(psv."MLSNumber", '')), normalized_term),
+          similarity(lower(COALESCE(psv."UnitNumber", '')), normalized_term),
+          similarity(lower(COALESCE(psv."StreetNumberText", COALESCE(psv."StreetNumber"::text, ''))), normalized_term),
+          similarity(lower(COALESCE(psv."StreetName", '')), normalized_term),
+          similarity(lower(COALESCE(psv."City", '')), normalized_term),
+          similarity(lower(COALESCE(psv."Community", '')), normalized_term),
+          similarity(lower(COALESCE(psv."FullAddress", '')), normalized_term)
+        ) >= address_similarity_threshold THEN 15
+        -- PublicRemarks matches (lower priority: 16)
+        WHEN similarity(lower(COALESCE(psv."PublicRemarks", '')), normalized_term) >= remarks_similarity_threshold
+          OR lower(COALESCE(psv."PublicRemarks", '')) ILIKE '%' || normalized_term || '%' THEN 16
+        -- Features matches (lowest priority: 17)
+        WHEN GREATEST(
+          similarity(lower(COALESCE(psv."PropertyFeatures", '')), normalized_term),
+          similarity(lower(COALESCE(psv."InteriorFeatures", '')), normalized_term),
+          similarity(lower(COALESCE(psv."ExteriorFeatures", '')), normalized_term)
+        ) >= features_similarity_threshold
+          OR lower(COALESCE(psv."PropertyFeatures", '')) ILIKE '%' || normalized_term || '%'
+          OR lower(COALESCE(psv."InteriorFeatures", '')) ILIKE '%' || normalized_term || '%'
+          OR lower(COALESCE(psv."ExteriorFeatures", '')) ILIKE '%' || normalized_term || '%' THEN 17
+        ELSE 999 -- No match
+      END AS match_priority,
+      -- Calculate overall similarity score (weighted by match type)
+      CASE
+        -- Address field matches get full weight
+        WHEN GREATEST(
+          similarity(lower(COALESCE(psv."MLSNumber", '')), normalized_term),
+          similarity(lower(COALESCE(psv."UnitNumber", '')), normalized_term),
+          similarity(lower(COALESCE(psv."StreetNumberText", COALESCE(psv."StreetNumber"::text, ''))), normalized_term),
+          similarity(lower(COALESCE(psv."StreetName", '')), normalized_term),
+          similarity(lower(COALESCE(psv."City", '')), normalized_term),
+          similarity(lower(COALESCE(psv."Community", '')), normalized_term),
+          similarity(lower(COALESCE(psv."FullAddress", '')), normalized_term)
+        ) >= address_similarity_threshold THEN
+          GREATEST(
+            similarity(lower(COALESCE(psv."MLSNumber", '')), normalized_term),
+            similarity(lower(COALESCE(psv."UnitNumber", '')), normalized_term),
+            similarity(lower(COALESCE(psv."StreetNumberText", COALESCE(psv."StreetNumber"::text, ''))), normalized_term),
+            similarity(lower(COALESCE(psv."StreetName", '')), normalized_term),
+            similarity(lower(COALESCE(psv."City", '')), normalized_term),
+            similarity(lower(COALESCE(psv."Community", '')), normalized_term),
+            similarity(lower(COALESCE(psv."FullAddress", '')), normalized_term)
+          ) + 1.0 -- Boost address matches
+        -- PublicRemarks matches get reduced weight
+        WHEN similarity(lower(COALESCE(psv."PublicRemarks", '')), normalized_term) >= remarks_similarity_threshold
+          OR lower(COALESCE(psv."PublicRemarks", '')) ILIKE '%' || normalized_term || '%' THEN
+          similarity(lower(COALESCE(psv."PublicRemarks", '')), normalized_term) + 0.5
+        -- Features matches get lowest weight
+        ELSE GREATEST(
+          similarity(lower(COALESCE(psv."PropertyFeatures", '')), normalized_term),
+          similarity(lower(COALESCE(psv."InteriorFeatures", '')), normalized_term),
+          similarity(lower(COALESCE(psv."ExteriorFeatures", '')), normalized_term)
+        ) + 0.3
+      END AS similarity_score
+    FROM public."PropertySuggestionView" psv
+    WHERE 
+      -- Address field matches (highest priority)
+      (
+        similarity(lower(COALESCE(psv."MLSNumber", '')), normalized_term) >= address_similarity_threshold
+        OR similarity(lower(COALESCE(psv."UnitNumber", '')), normalized_term) >= address_similarity_threshold
+        OR similarity(lower(COALESCE(psv."StreetNumberText", COALESCE(psv."StreetNumber"::text, ''))), normalized_term) >= address_similarity_threshold
+        OR similarity(lower(COALESCE(psv."StreetName", '')), normalized_term) >= address_similarity_threshold
+        OR similarity(lower(COALESCE(psv."City", '')), normalized_term) >= address_similarity_threshold
+        OR similarity(lower(COALESCE(psv."Community", '')), normalized_term) >= address_similarity_threshold
+        OR similarity(lower(COALESCE(psv."FullAddress", '')), normalized_term) >= address_similarity_threshold
+        -- Also include exact/prefix/substring matches in address fields
+        OR lower(COALESCE(psv."MLSNumber", '')) ILIKE '%' || normalized_term || '%'
+        OR lower(COALESCE(psv."UnitNumber", '')) ILIKE '%' || normalized_term || '%'
+        OR lower(COALESCE(psv."StreetNumberText", COALESCE(psv."StreetNumber"::text, ''))) ILIKE '%' || normalized_term || '%'
+        OR lower(COALESCE(psv."StreetName", '')) ILIKE '%' || normalized_term || '%'
+        OR lower(COALESCE(psv."City", '')) ILIKE '%' || normalized_term || '%'
+        OR lower(COALESCE(psv."Community", '')) ILIKE '%' || normalized_term || '%'
+        OR lower(COALESCE(psv."FullAddress", '')) ILIKE '%' || normalized_term || '%'
+      )
+      -- PublicRemarks matches (only if no address matches found)
+      OR (
+        similarity(lower(COALESCE(psv."PublicRemarks", '')), normalized_term) >= remarks_similarity_threshold
+        OR lower(COALESCE(psv."PublicRemarks", '')) ILIKE '%' || normalized_term || '%'
+      )
+      -- Features matches (only if no address/remarks matches found)
+      OR (
+        GREATEST(
+          similarity(lower(COALESCE(psv."PropertyFeatures", '')), normalized_term),
+          similarity(lower(COALESCE(psv."InteriorFeatures", '')), normalized_term),
+          similarity(lower(COALESCE(psv."ExteriorFeatures", '')), normalized_term)
+        ) >= features_similarity_threshold
+        OR lower(COALESCE(psv."PropertyFeatures", '')) ILIKE '%' || normalized_term || '%'
+        OR lower(COALESCE(psv."InteriorFeatures", '')) ILIKE '%' || normalized_term || '%'
+        OR lower(COALESCE(psv."ExteriorFeatures", '')) ILIKE '%' || normalized_term || '%'
+      )
+  )
   SELECT 
-    psv."ListingKey",
-    psv."MLSNumber",
-    psv."FullAddress",
-    psv."City",
-    psv."StateOrProvince",
-    psv."CityRegion",
-    psv."PostalCode",
-    psv."MlsStatus",
-    psv."Status",
-    psv."ListingAge",
-    psv."ListPrice",
-    psv."OriginalListPrice",
-    psv."IsPriceReduced",
-    psv."PriceReductionAmount",
-    psv."PriceReductionPercent",
-    psv."ReductionNumber",
-    psv."BedroomsAboveGrade",
-    psv."BedroomsBelowGrade",
-    psv."BathroomsTotalInteger",
-    psv."LivingAreaMin",
-    psv."LivingAreaMax",
-    psv."PropertySubType",
-    psv."PrimaryImageUrl",
-    GREATEST(
-      similarity(lower(psv."FullAddress"), normalized_term),
-      similarity(lower(psv."City"), normalized_term),
-      similarity(lower(psv."MLSNumber"), normalized_term)
-    ) AS similarity_score
-  FROM public."PropertySuggestionView" psv
-  WHERE 
-    -- Use similarity for fuzzy matching
-    (
-      similarity(lower(psv."FullAddress"), normalized_term) >= similarity_threshold
-      OR similarity(lower(psv."City"), normalized_term) >= similarity_threshold
-      OR similarity(lower(psv."MLSNumber"), normalized_term) >= similarity_threshold
-    )
-    -- Also include exact substring matches (ILIKE) for better coverage
-    OR lower(psv."FullAddress") ILIKE '%' || normalized_term || '%'
-    OR lower(psv."City") ILIKE '%' || normalized_term || '%'
-    OR lower(psv."MLSNumber") ILIKE '%' || normalized_term || '%'
+    sr."ListingKey",
+    sr."MLSNumber",
+    sr."FullAddress",
+    sr."City",
+    sr."StateOrProvince",
+    sr."CityRegion",
+    sr."PostalCode",
+    sr."MlsStatus",
+    sr."Status",
+    sr."ListingAge",
+    sr."ListPrice",
+    sr."OriginalListPrice",
+    sr."IsPriceReduced",
+    sr."PriceReductionAmount",
+    sr."PriceReductionPercent",
+    sr."ReductionNumber",
+    sr."BedroomsAboveGrade",
+    sr."BedroomsBelowGrade",
+    sr."BathroomsTotalInteger",
+    sr."LivingAreaMin",
+    sr."LivingAreaMax",
+    sr."PropertySubType",
+    sr."PrimaryImageUrl",
+    sr.similarity_score
+  FROM scored_results sr
+  WHERE sr.match_priority < 999 -- Exclude non-matches
   ORDER BY 
-    -- Prioritize exact matches and prefix matches over substring matches
-    -- This CASE statement ensures prefix matches ALWAYS rank above substring matches
-    CASE 
-      -- Exact matches (highest priority)
-      WHEN lower(psv."FullAddress") = normalized_term THEN 1
-      WHEN lower(psv."City") = normalized_term THEN 2
-      WHEN lower(psv."MLSNumber") = normalized_term THEN 3
-      -- Prefix matches (address starts with search term) - CRITICAL for numeric searches like "331"
-      -- For "331", this matches "331 Elmwood Ave" but NOT "1331 Gerrard St" or "2-1331 Gerrard St"
-      WHEN lower(psv."FullAddress") LIKE normalized_term || '%' THEN 4
-      WHEN lower(psv."City") LIKE normalized_term || '%' THEN 5
-      WHEN lower(psv."MLSNumber") LIKE normalized_term || '%' THEN 6
-      -- Substring matches (lowest priority) - these should rank below prefix matches
-      -- For "331", this matches "1331 Gerrard St" (contains "331" but street number doesn't start with it)
-      ELSE 7
-    END,
-    -- Boost similarity score for prefix matches significantly
-    -- Reference the GREATEST expression directly instead of the alias
-    CASE 
-      WHEN lower(psv."FullAddress") LIKE normalized_term || '%' THEN 
-        GREATEST(
-          similarity(lower(psv."FullAddress"), normalized_term),
-          similarity(lower(psv."City"), normalized_term),
-          similarity(lower(psv."MLSNumber"), normalized_term)
-        ) + 1.0
-      WHEN lower(psv."City") LIKE normalized_term || '%' THEN 
-        GREATEST(
-          similarity(lower(psv."FullAddress"), normalized_term),
-          similarity(lower(psv."City"), normalized_term),
-          similarity(lower(psv."MLSNumber"), normalized_term)
-        ) + 0.8
-      WHEN lower(psv."MLSNumber") LIKE normalized_term || '%' THEN 
-        GREATEST(
-          similarity(lower(psv."FullAddress"), normalized_term),
-          similarity(lower(psv."City"), normalized_term),
-          similarity(lower(psv."MLSNumber"), normalized_term)
-        ) + 0.8
-      ELSE 
-        GREATEST(
-          similarity(lower(psv."FullAddress"), normalized_term),
-          similarity(lower(psv."City"), normalized_term),
-          similarity(lower(psv."MLSNumber"), normalized_term)
-        )
-    END DESC,
-    psv."FullAddress" ASC
+    sr.match_priority ASC, -- Lower priority number = higher priority
+    sr.similarity_score DESC, -- Higher similarity = better match
+    sr."FullAddress" ASC
   LIMIT result_limit;
 END;
 $$;
@@ -164,15 +264,6 @@ GRANT EXECUTE ON FUNCTION public.search_property_suggestions(text, integer) TO a
 GRANT EXECUTE ON FUNCTION public.search_property_suggestions(text, integer) TO service_role;
 GRANT EXECUTE ON FUNCTION public.search_property_suggestions(text, integer) TO anon;
 
--- Create index for better performance (if not already exists)
--- Trigram indexes are already mentioned in PropertySuggestionView.sql but not created
--- We'll add them here for better fuzzy search performance
-CREATE INDEX IF NOT EXISTS idx_psv_fulladdress_trgm 
-  ON public."PropertySuggestionView" USING gin ("FullAddress" gin_trgm_ops);
-
-CREATE INDEX IF NOT EXISTS idx_psv_city_trgm 
-  ON public."PropertySuggestionView" USING gin ("City" gin_trgm_ops);
-
-CREATE INDEX IF NOT EXISTS idx_psv_mlsnumber_trgm 
-  ON public."PropertySuggestionView" USING gin ("MLSNumber" gin_trgm_ops);
+-- Note: Trigram indexes are created in PropertySuggestionView.sql
+-- This function relies on those indexes for performance
 

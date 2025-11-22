@@ -238,17 +238,13 @@ function applyStatusFilter(query, status) {
       // For values with spaces, use quotes: "For Sale"
       // For AND conditions: field1.eq.value1.and.field2.eq.value2
       return query.or(
-        'MlsStatus.in.("For Sale","Sold Conditional","Sold Conditional Escape"),' +
-        'MlsStatus.eq."Price Reduced".and.TransactionType.eq."For Sale",' +
-        'MlsStatus.in.("Price Change","Extension").and.TransactionType.eq."For Sale"'
+        'MlsStatus.in.("For Sale","Sold Conditional","Sold Conditional Escape"),MlsStatus.eq."Price Reduced".and.TransactionType.eq."For Sale",MlsStatus.in.("Price Change","Extension").and.TransactionType.eq."For Sale"'
       );
       
     case 'for_lease':
       // FOR LEASE: Similar approach
       return query.or(
-        'MlsStatus.in.("For Lease","For Sub-Lease","For Lease Conditional","For Lease Conditional Escape"),' +
-        'MlsStatus.eq."Price Reduced".and.TransactionType.eq."For Lease",' +
-        'MlsStatus.in.("Price Change","Extension").and.TransactionType.eq."For Lease"'
+        'MlsStatus.in.("For Lease","For Sub-Lease","For Lease Conditional","For Lease Conditional Escape"),MlsStatus.eq."Price Reduced".and.TransactionType.eq."For Lease",MlsStatus.in.("Price Change","Extension").and.TransactionType.eq."For Lease"'
       );
       
     case 'sold':
@@ -270,9 +266,7 @@ function applyStatusFilter(query, status) {
     default:
       // Default to for_sale if invalid status
       return query.or(
-        'MlsStatus.in.("For Sale","Sold Conditional","Sold Conditional Escape"),' +
-        'MlsStatus.eq."Price Reduced".and.TransactionType.eq."For Sale",' +
-        'MlsStatus.in.("Price Change","Extension").and.TransactionType.eq."For Sale"'
+        'MlsStatus.in.("For Sale","Sold Conditional","Sold Conditional Escape"),MlsStatus.eq."Price Reduced".and.TransactionType.eq."For Sale",MlsStatus.in.("Price Change","Extension").and.TransactionType.eq."For Sale"'
       );
   }
 }

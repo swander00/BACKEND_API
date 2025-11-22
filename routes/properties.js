@@ -13,6 +13,7 @@ import {
   queryPropertySuggestions,
   queryMapPopupProperties
 } from '../services/propertyQueries.js';
+import { getListingHistory } from '../services/listingHistoryService.js';
 import { buildCacheKey, getCache, setCache } from '../utils/cache.js';
 import { parseNumber, parseArrayParam, parseBoolean, validatePagination, validateSearchTerm, validateMapBounds, validateListingKey, validateStatus } from '../utils/validation.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -392,6 +393,39 @@ router.get('/', async (req, res, next) => {
 // ===============================================================================================
 // [2] PROPERTY DETAILS
 // ===============================================================================================
+
+/**
+ * GET /api/properties/:listingKey/listing-history
+ * Returns listing history and price changes for a property
+ * NOTE: Must be defined BEFORE /:listingKey route to avoid route conflict
+ */
+router.get('/:listingKey/listing-history', async (req, res, next) => {
+  try {
+    const listingKey = validateListingKey(req.params.listingKey);
+    
+    logger.debug('Fetching listing history', { requestId: req.id, listingKey });
+    
+    const history = await getListingHistory(listingKey, true); // true = identifier is ListingKey
+    
+    // Set cache headers (listing history changes less frequently)
+    res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate'); // 5 minutes
+    
+    res.json(history);
+  } catch (error) {
+    logger.error(`GET /api/properties/${req.params.listingKey}/listing-history error`, {
+      requestId: req.id,
+      listingKey: req.params.listingKey,
+      error: error.message,
+      stack: error.stack
+    });
+    
+    if (error.message.includes('not found')) {
+      return next(new NotFoundError('Property', req.params.listingKey));
+    }
+    
+    next(error);
+  }
+});
 
 /**
  * GET /api/properties/:listingKey

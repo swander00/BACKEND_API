@@ -13,6 +13,7 @@ import { mapRooms } from '../mappers/rooms.js';
 import { mapOpenHouse } from '../mappers/openhouse.js';
 import { Logger } from '../utils/logger.js';
 import { geocodePropertyAsync } from '../services/geocodingService.js';
+import { processPropertyListingHistory } from '../services/listingHistoryService.js';
 
 // ===============================================================================================
 // [1] CONFIGURATION AND CONSTANTS
@@ -271,6 +272,15 @@ async function processProperty(rawProperty, syncType) {
         // Don't fail sync if geocoding fails
         Logger.warn(`Geocoding setup failed for ${listingKey}: ${error.message}`);
       }
+    }
+    
+    // [4.1.6] Process listing history (async, non-blocking)
+    // Process listing periods and price changes
+    try {
+      await processPropertyListingHistory(rawProperty);
+    } catch (error) {
+      // Don't fail sync if listing history processing fails
+      Logger.warn(`Listing history processing failed for ${listingKey}: ${error.message}`);
     }
     // [4.1] End
 

@@ -25,10 +25,21 @@ SELECT
   
   -- Address fields (for search)
   pv."FullAddress",
+  pv."UnitNumber",
+  pv."StreetNumber",
+  pv."StreetNumberText",
+  pv."StreetName",
   pv."City",
   pv."StateOrProvince",
   pv."CityRegion",
+  pv."Community",
   pv."PostalCode",
+  
+  -- Searchable text fields
+  pv."PublicRemarks",
+  pv."PropertyFeatures",
+  pv."InteriorFeatures",
+  pv."ExteriorFeatures",
   
   -- Status
   pv."MlsStatus",
@@ -61,8 +72,9 @@ SELECT
   pv."PrimaryImageUrl"
   
 FROM public."PropertyView" pv
-WHERE pv."MlsStatus" NOT IN ('Sold', 'Expired', 'Cancelled', 'Withdrawn')
-  AND pv."ListPriceRaw" IS NOT NULL
+-- Note: No status filtering - search suggestions should show all statuses
+-- Only filter out properties without valid prices
+WHERE pv."ListPriceRaw" IS NOT NULL
   AND (pv."ListPriceRaw"::numeric) > 0;
 
 -- Create unique index for concurrent refresh
@@ -91,6 +103,31 @@ CREATE INDEX IF NOT EXISTS idx_psv_city_trgm
 
 CREATE INDEX IF NOT EXISTS idx_psv_mlsnumber_trgm 
   ON public."PropertySuggestionView" USING gin ("MLSNumber" gin_trgm_ops);
+
+-- Additional trigram indexes for new search fields
+CREATE INDEX IF NOT EXISTS idx_psv_unitnumber_trgm 
+  ON public."PropertySuggestionView" USING gin (COALESCE("UnitNumber", '') gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_psv_streetnumber_trgm 
+  ON public."PropertySuggestionView" USING gin (COALESCE("StreetNumber"::text, COALESCE("StreetNumberText", '')) gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_psv_streetname_trgm 
+  ON public."PropertySuggestionView" USING gin (COALESCE("StreetName", '') gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_psv_community_trgm 
+  ON public."PropertySuggestionView" USING gin (COALESCE("Community", '') gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_psv_publicremarks_trgm 
+  ON public."PropertySuggestionView" USING gin (COALESCE("PublicRemarks", '') gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_psv_propertyfeatures_trgm 
+  ON public."PropertySuggestionView" USING gin (COALESCE("PropertyFeatures", '') gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_psv_interiorfeatures_trgm 
+  ON public."PropertySuggestionView" USING gin (COALESCE("InteriorFeatures", '') gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_psv_exteriorfeatures_trgm 
+  ON public."PropertySuggestionView" USING gin (COALESCE("ExteriorFeatures", '') gin_trgm_ops);
 
 -- Refresh the view
 REFRESH MATERIALIZED VIEW public."PropertySuggestionView";

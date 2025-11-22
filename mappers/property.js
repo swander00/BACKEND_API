@@ -27,7 +27,11 @@ const ALLOWED_PROPERTY_FIELDS = [
   'ParkingTotal', 'AssociationAmenities', 'Locker', 'BalconyType',
   'PetsAllowed', 'AssociationFee', 'AssociationFeeIncludes', 'ApproximateAge',
   'AdditionalMonthlyFee', 'TaxAnnualAmount', 'TaxYear', 'LotDepth',
-  'LotWidth', 'LotSizeUnits', 'Furnished', 'RentIncludes'
+  'LotWidth', 'LotSizeUnits', 'Furnished', 'RentIncludes',
+  // Listing history fields
+  'OriginalListPrice', 'PreviousListPrice', 'PriceChangeTimestamp',
+  'BackOnMarketEntryTimestamp', 'LeasedEntryTimestamp', 'LeasedConditionalEntryTimestamp',
+  'DealFellThroughEntryTimestamp', 'ExtensionEntryTimestamp'
 ];
 
 /**
