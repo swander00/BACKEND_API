@@ -206,6 +206,7 @@ router.get('/', async (req, res, next) => {
       lotDepth: req.query.lotDepth && req.query.lotDepth !== 'null' && req.query.lotDepth !== '' 
         ? req.query.lotDepth 
         : null,
+      minLotSizeAcres: parseNumber(req.query.minLotSizeAcres, 0, null, 'minLotSizeAcres'),
       minMaintenanceFee: parseNumber(req.query.minMaintenanceFee, 0, 10000, 'minMaintenanceFee'),
       maxMaintenanceFee: parseNumber(req.query.maxMaintenanceFee, 0, 10000, 'maxMaintenanceFee'),
       minPropertyTax: parseNumber(req.query.minPropertyTax, 0, 100000, 'minPropertyTax'),
@@ -216,6 +217,9 @@ router.get('/', async (req, res, next) => {
       propertyAge: req.query.propertyAge && req.query.propertyAge !== 'null' && req.query.propertyAge !== '' 
         ? req.query.propertyAge 
         : null,
+      fixerUpperKeywords: req.query.fixerUpperKeywords !== undefined 
+        ? parseBoolean(req.query.fixerUpperKeywords) 
+        : undefined,
       hasSwimmingPool: req.query.hasSwimmingPool !== undefined 
         ? parseBoolean(req.query.hasSwimmingPool) 
         : undefined,

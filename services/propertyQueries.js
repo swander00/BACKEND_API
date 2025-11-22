@@ -558,6 +558,23 @@ function applyPropertyCardFilters(query, filters) {
     }
   }
 
+  // Lot size acres (LotSizeAcres)
+  // Filter properties with LotSizeAcres >= minLotSizeAcres
+  if (filters.minLotSizeAcres !== undefined && filters.minLotSizeAcres !== null) {
+    logger.debug('Lot size acres filter received', { 
+      minLotSizeAcres: filters.minLotSizeAcres,
+      type: typeof filters.minLotSizeAcres
+    });
+    
+    // Explicitly exclude nulls and apply minimum filter
+    query = query.not('LotSizeAcres', 'is', null)
+                  .gte('LotSizeAcres', filters.minLotSizeAcres);
+    logger.debug('Lot size acres filter applied', { 
+      minLotSizeAcres: filters.minLotSizeAcres,
+      filter: `LotSizeAcres IS NOT NULL AND LotSizeAcres >= ${filters.minLotSizeAcres}`
+    });
+  }
+
   // Maintenance fee (AssociationFee or AdditionalMonthlyFee)
   // Filter on AssociationFee primarily (most common field)
   // Note: For exact COALESCE behavior (use AssociationFee if available, else AdditionalMonthlyFee),
@@ -659,6 +676,52 @@ function applyPropertyCardFilters(query, filters) {
           // Apartment typically means finished basement with separate entrance
           basementConditions.push('BasementStatus.ilike.%Apartment%');
           break;
+        case 'Rental Basement Unit':
+          // Filter by UnitNumber patterns that indicate basement rental units
+          // This covers various abbreviations and misspellings found in MLS data
+          const unitNumberPatterns = [
+            '%basement%',
+            '%basem%',
+            '%basemnt%',
+            '%basmt%',
+            '%bsmt%',
+            '%bsmnt%',
+            'w/o%',
+            'w/o bsm%',
+            'walk%out%',
+            'walkout%',
+            'wo bsmt%',
+            'wo/bsmt%',
+            'br %',
+            'br#%',
+            'bsmnt #%',
+            'bsmnt#%',
+            'bsmt #%',
+            'bsmt#%',
+            'bsmt %',
+            'bsmt-%',
+            'bsmt/%',
+            'bachelor-basement%',
+            'basement-%',
+            'basement a%',
+            'basement apartment%',
+            'basement apt%',
+            'basement unit%',
+            'basement room%',
+            'bsmt room%',
+            'bsmt unit%',
+            'bsmt apt%',
+            'bsmt apart%',
+            'bsm apt%',
+            'bsmnt-%',
+            'bsmnt/%',
+            'bsmnt#%',
+          ];
+          // Add each pattern as a separate condition
+          unitNumberPatterns.forEach(pattern => {
+            basementConditions.push(`UnitNumber.ilike.${pattern}`);
+          });
+          break;
       }
     });
     
@@ -678,6 +741,46 @@ function applyPropertyCardFilters(query, filters) {
       filtersObject: JSON.stringify(filters)
     });
     query = query.eq('PropertyAge', filters.propertyAge);
+  }
+
+  // Fixer-Upper Keywords (PublicRemarks)
+  // Search PublicRemarks for fixer-upper related keywords using OR logic
+  if (filters.fixerUpperKeywords === true) {
+    logger.debug('Fixer-upper keywords filter applied', { 
+      fixerUpperKeywords: filters.fixerUpperKeywords
+    });
+    
+    // List of keywords to search for in PublicRemarks (case-insensitive)
+    // Using %keyword% pattern for partial matching
+    const fixerUpperKeywords = [
+      '%tlc%',
+      '%as-is%',
+      '%as is%',
+      '%fixer%',
+      '%handyman%',
+      '%needs work%',
+      '%needs repair%',
+      '%needs updating%',
+      '%renovator%',
+      '%diamond in the rough%',
+      '%great bones%',
+      '%estate sale%',
+      '%power of sale%',
+      '%tender love care%'
+    ];
+    
+    // Build OR condition string for Supabase PostgREST
+    // Format: 'PublicRemarks.ilike.%keyword1%,PublicRemarks.ilike.%keyword2%,...'
+    const orConditions = fixerUpperKeywords
+      .map(keyword => `PublicRemarks.ilike.${keyword}`)
+      .join(',');
+    
+    query = query.or(orConditions);
+    
+    logger.debug('Fixer-upper keywords filter applied (OR conditions)', { 
+      keywordCount: fixerUpperKeywords.length,
+      orConditions
+    });
   }
 
   // Swimming pool (PoolFeatures)
