@@ -86,7 +86,7 @@ export function errorHandler(err, req, res, next) {
   if (origin) {
     const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
     const isDevelopment = process.env.NODE_ENV !== 'production';
-    const localhostRegex = /^https?:\/\/localhost(:\d+)?$/;
+    const localhostRegex = /^https?:\/\/localhost(:\d+)?$/i;
     
     const isAllowed = localhostRegex.test(origin) || allowedOrigins.includes(origin);
     
@@ -95,7 +95,7 @@ export function errorHandler(err, req, res, next) {
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   }
 
@@ -142,7 +142,7 @@ export function notFoundHandler(req, res) {
   if (origin) {
     const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
     const isDevelopment = process.env.NODE_ENV !== 'production';
-    const localhostRegex = /^https?:\/\/localhost(:\d+)?$/;
+    const localhostRegex = /^https?:\/\/localhost(:\d+)?$/i;
     
     const isAllowed = localhostRegex.test(origin) || allowedOrigins.includes(origin);
     
@@ -151,7 +151,7 @@ export function notFoundHandler(req, res) {
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   }
   

@@ -19,18 +19,20 @@ import { clearCache } from './utils/cache.js';
 import { spawn } from 'child_process';
 import { requestLogger, logger } from './utils/logger.js';
 import { errorHandler, notFoundHandler } from './utils/errors.js';
-import { securityHeaders } from './utils/security.js';
+import { securityHeaders, sanitizeInput } from './utils/security.js';
 import { initDB } from './db/client.js';
 import { getMetrics } from './utils/metrics.js';
 
 // Load environment variables from .env.local (preferred) or fallback to environment.env
 const envLocalResult = dotenv.config({ path: './.env.local' });
 if (envLocalResult.error && envLocalResult.error.code !== 'ENOENT') {
+  // Use console.log here as logger may not be initialized yet during env loading
   console.log('Warning: Could not load .env.local:', envLocalResult.error.message);
 }
 if (!process.env.PORT && !process.env.SUPABASE_URL) {
   const envResult = dotenv.config({ path: './environment.env' });
   if (envResult.error && envResult.error.code !== 'ENOENT') {
+    // Use console.log here as logger may not be initialized yet during env loading
     console.log('Warning: Could not load environment.env:', envResult.error.message);
   }
 }
@@ -77,23 +79,28 @@ app.use(securityHeaders);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Input sanitization (after body parsing, before routes)
+// TEMPORARILY DISABLED - Was blocking valid requests. Re-enable after fixing sanitization logic.
+// app.use(sanitizeInput);
+
 // Serve OpenAPI spec (BEFORE static middleware to ensure it's matched)
-console.log('[Server Init] Registering /openapi.json route...');
+logger.debug('Registering /openapi.json route');
 app.get('/openapi.json', (req, res) => {
   try {
     const specPath = path.join(__dirname, 'docs', 'openapi.json');
     if (!fs.existsSync(specPath)) {
+      logger.warn('OpenAPI spec file not found', { path: specPath });
       return res.status(404).json({ error: 'OpenAPI spec file not found', path: specPath });
     }
     const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'));
     res.setHeader('Content-Type', 'application/json');
     return res.json(spec);
   } catch (err) {
-    console.error('[OpenAPI] Error:', err.message);
+    logger.error('Failed to load OpenAPI spec', { error: err.message });
     return res.status(500).json({ error: 'Failed to load OpenAPI spec', message: err.message });
   }
 });
-console.log('[Server Init] /openapi.json route registered');
+logger.debug('/openapi.json route registered');
 
 // Static files
 app.use(express.static('public'));
@@ -113,22 +120,19 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
 
 // Log CORS configuration on startup
 if (isDevelopment) {
-  console.log('[CORS] Development mode: localhost origins allowed');
+  logger.info('CORS: Development mode - localhost origins allowed');
   if (allowedOrigins.length > 0) {
-    console.log(`[CORS] Additional allowed origins:`, allowedOrigins);
+    logger.info('CORS: Additional allowed origins', { origins: allowedOrigins });
   }
 } else {
   if (allowedOrigins.length > 0) {
-    console.log(`[CORS] Production mode: ${allowedOrigins.length} allowed origin(s):`);
-    allowedOrigins.forEach((origin, idx) => {
-      console.log(`[CORS]   ${idx + 1}. "${origin}" (length: ${origin.length})`);
+    logger.info('CORS: Production mode - allowed origins configured', {
+      count: allowedOrigins.length,
+      origins: allowedOrigins
     });
-    console.log(`[CORS] Raw env value: "${process.env.ALLOWED_ORIGINS || 'not set'}"`);
   } else {
-    console.warn('[CORS] ⚠️  Production mode: NO ALLOWED_ORIGINS configured!');
-    console.warn('[CORS] ⚠️  Set ALLOWED_ORIGINS environment variable in Railway to allow frontend requests.');
-    console.warn('[CORS] ⚠️  Example: ALLOWED_ORIGINS=https://frontend-api-pi.vercel.app');
-    console.warn(`[CORS] ⚠️  Current env value: "${process.env.ALLOWED_ORIGINS || 'not set'}"`);
+    logger.warn('CORS: Production mode - NO ALLOWED_ORIGINS configured!');
+    logger.warn('CORS: Set ALLOWED_ORIGINS environment variable in Railway to allow frontend requests.');
   }
 }
 
@@ -138,7 +142,7 @@ function setCorsHeaders(req, res) {
   
   // Always set CORS headers for preflight and methods
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   
   if (!origin) {
@@ -150,9 +154,14 @@ function setCorsHeaders(req, res) {
   let isAllowed = false;
   
   // Always allow localhost for development (common use case)
-  const localhostRegex = /^https?:\/\/localhost(:\d+)?$/;
+  // Match: http://localhost, http://localhost:3000, https://localhost, etc.
+  const localhostRegex = /^https?:\/\/localhost(:\d+)?$/i;
   if (localhostRegex.test(origin)) {
     isAllowed = true;
+    // Log in development for debugging
+    if (isDevelopment) {
+      logger.debug('CORS: Localhost origin allowed', { origin, path: req.path });
+    }
   } else if (allowedOrigins.length > 0) {
     // Check against configured allowed origins (exact match)
     isAllowed = allowedOrigins.includes(origin);
@@ -175,37 +184,74 @@ function setCorsHeaders(req, res) {
     return true; // CORS headers set
   }
   
-  // Log warning in production if origin is not allowed
-  if (!isDevelopment && origin) {
+  // Log warning if origin is not allowed (both dev and prod for debugging)
+  if (origin) {
     logger.warn('CORS: Origin not allowed', { 
       origin, 
       originLength: origin.length,
+      isDevelopment,
       allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : 'none configured',
       allowedOriginsCount: allowedOrigins.length,
       rawEnvValue: process.env.ALLOWED_ORIGINS || 'not set',
-      hint: 'Set ALLOWED_ORIGINS environment variable in Railway'
+      localhostMatch: localhostRegex.test(origin),
+      hint: isDevelopment ? 'Check localhost regex matching' : 'Set ALLOWED_ORIGINS environment variable in Railway'
     });
     
-    // Debug: Show exact comparison
-    console.error('[CORS DEBUG] Origin received:', JSON.stringify(origin));
-    console.error('[CORS DEBUG] Allowed origins:', JSON.stringify(allowedOrigins));
-    console.error('[CORS DEBUG] Exact match check:', allowedOrigins.map(o => ({
-      allowed: o,
-      received: origin,
-      match: o === origin,
-      lengths: { allowed: o.length, received: origin.length }
-    })));
+    // Debug: Show exact comparison (only in development)
+    if (isDevelopment) {
+      logger.debug('CORS debug: Origin comparison', {
+        origin: JSON.stringify(origin),
+        allowedOrigins: JSON.stringify(allowedOrigins),
+        comparisons: allowedOrigins.map(o => ({
+          allowed: o,
+          received: origin,
+          match: o === origin,
+          lengths: { allowed: o.length, received: origin.length }
+        }))
+      });
+    }
   }
   
   return false; // Origin not allowed
 }
 
+// CORS middleware - must be before routes
 app.use((req, res, next) => {
-  setCorsHeaders(req, res);
+  const origin = req.headers.origin;
   
+  // Always set CORS headers for preflight
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  // Handle preflight requests
   if (req.method === 'OPTIONS') {
+    // Set CORS headers for preflight
+    if (origin) {
+      const localhostRegex = /^https?:\/\/localhost(:\d+)?$/i;
+      if (localhostRegex.test(origin) || allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
+    }
     return res.sendStatus(200);
   }
+  
+  // Set CORS headers for actual requests
+  // Always allow localhost in development
+  if (origin) {
+    const localhostRegex = /^https?:\/\/localhost(:\d+)?$/i;
+    if (localhostRegex.test(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else if (allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+  }
+  
+  // Also call setCorsHeaders for additional header setup
+  setCorsHeaders(req, res);
   
   next();
 });
@@ -288,7 +334,7 @@ app.get('/test-route-debug', (req, res) => {
 app.post('/trigger-sync', async (req, res) => {
   const { type = 'IDX', reset = false, limit = null } = req.body;
   
-  console.log(`Manual sync triggered: ${type} | Reset: ${reset} | Limit: ${limit}`);
+  logger.info('Manual sync triggered', { type, reset, limit });
   
   // Send immediate response
   res.json({ 
@@ -305,7 +351,20 @@ app.post('/trigger-sync', async (req, res) => {
   }
 });
 
-// [1.4] Property API Routes (Frontend-facing endpoints)
+// [1.4] API Versioning
+// Version 1 API routes (current version)
+app.use('/api/v1/properties', propertiesRouter);
+app.use('/api/v1/search', searchRouter);
+app.use('/api/v1/media', mediaRouter);
+app.use('/api/v1/users', usersRouter);
+app.use('/api/v1/likes', likesRouter);
+app.use('/api/v1/saved-listings', savedListingsRouter);
+app.use('/api/v1/viewing-history', viewingHistoryRouter);
+app.use('/api/v1/saved-searches', savedSearchesRouter);
+app.use('/api/v1/notifications', notificationsRouter);
+
+// Legacy routes (without version) - redirect to v1 for backward compatibility
+// Note: In production, consider deprecating these after frontend migration
 app.use('/api/properties', propertiesRouter);
 app.use('/api/search', searchRouter);
 app.use('/api/media', mediaRouter);

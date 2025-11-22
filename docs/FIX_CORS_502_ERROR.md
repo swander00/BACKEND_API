@@ -1,5 +1,19 @@
 # Fix CORS and 502 Bad Gateway Errors in Production
 
+## Quick Fix (2 minutes)
+
+If you're seeing CORS errors, the fastest solution is:
+
+1. Go to [Railway Dashboard](https://railway.app)
+2. Select your backend project → **Variables** tab
+3. Add: `ALLOWED_ORIGINS=https://frontend-api-pi.vercel.app`
+4. Wait for automatic redeploy (1-2 minutes)
+
+For multiple frontends, use comma-separated values (no spaces):
+```
+ALLOWED_ORIGINS=https://frontend-api-pi.vercel.app,https://staging-frontend.vercel.app
+```
+
 ## Problem
 
 You're seeing two errors in production:
@@ -19,12 +33,20 @@ The `ALLOWED_ORIGINS` environment variable is **not set** in Railway, so:
 
 ### Step 1: Set ALLOWED_ORIGINS in Railway
 
+**Option 1: Railway Dashboard (Easiest)**
 1. Go to your Railway project dashboard
 2. Navigate to **Variables** tab
-3. Add the following environment variable:
+3. Click **+ New Variable**
+4. Add:
+   - **Key**: `ALLOWED_ORIGINS`
+   - **Value**: `https://frontend-api-pi.vercel.app`
+5. Click **Add**
+6. Railway will automatically redeploy (wait 1-2 minutes)
 
-```
-ALLOWED_ORIGINS=https://frontend-api-pi.vercel.app
+**Option 2: Railway CLI**
+```bash
+cd BACKEND_API
+railway variables set ALLOWED_ORIGINS=https://frontend-api-pi.vercel.app
 ```
 
 **Important**: 

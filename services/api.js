@@ -5,7 +5,7 @@
 // Provides both class-based methods and standalone function exports for compatibility.
 // ===============================================================================================
 
-// Logger import removed - not used in this file
+import { logger } from '../utils/logger.js';
 
 // ===============================================================================================
 // [1] API CLIENT CLASS
@@ -76,9 +76,13 @@ export class APIClient {
         
         if (attempt < maxRetries && isRetryable) {
           const delayMs = 1000 * attempt; // Exponential backoff: 1s, 2s, 3s
-          console.log(`[RETRY] Attempt ${attempt}/${maxRetries} failed. Retrying in ${delayMs}ms...`);
-          console.log(`[RETRY] Error: ${error.message}`);
-          console.log(`[RETRY] URL: ${url.substring(0, 100)}...`); // Log first 100 chars of URL
+          logger.warn('API request retry', {
+            attempt,
+            maxRetries,
+            delayMs,
+            error: error.message,
+            url: url.substring(0, 100) // Log first 100 chars of URL
+          });
           await new Promise(resolve => setTimeout(resolve, delayMs));
           continue;
         }
@@ -168,8 +172,12 @@ export class APIClient {
         
         if (attempt < maxRetries && isRetryable) {
           const delayMs = 1000 * attempt;
-          console.log(`[RETRY] Count request attempt ${attempt}/${maxRetries} failed. Retrying in ${delayMs}ms...`);
-          console.log(`[RETRY] Error: ${error.message}`);
+          logger.warn('API count request retry', {
+            attempt,
+            maxRetries,
+            delayMs,
+            error: error.message
+          });
           await new Promise(resolve => setTimeout(resolve, delayMs));
           continue;
         }

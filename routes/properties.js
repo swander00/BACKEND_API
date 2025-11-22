@@ -257,14 +257,15 @@ router.get('/', async (req, res, next) => {
         values: filters.propertyClass,
         queryString: req.originalUrl || req.url
       });
-      console.log('[routes/properties] PropertyClass filter DEBUG:', {
+      logger.debug('PropertyClass filter DEBUG', {
+        requestId: req.id,
         raw: req.query.propertyClass,
         parsed: filters.propertyClass,
         isArray: Array.isArray(filters.propertyClass),
         url: req.originalUrl || req.url
       });
     } else {
-      console.log('[routes/properties] No PropertyClass filter in request');
+      logger.debug('No PropertyClass filter in request', { requestId: req.id });
     }
 
     // Debug logging for status filter
@@ -277,11 +278,12 @@ router.get('/', async (req, res, next) => {
     
     // Extra logging for removed status
     if (filters.status === 'removed') {
-      console.log('[routes/properties] ========== REMOVED STATUS REQUEST ==========');
-      console.log('[routes/properties] Raw query param:', req.query.status);
-      console.log('[routes/properties] Normalized status:', filters.status);
-      console.log('[routes/properties] All filters:', JSON.stringify(filters, null, 2));
-      console.log('[routes/properties] ===========================================');
+      logger.debug('REMOVED STATUS REQUEST', {
+        requestId: req.id,
+        rawStatus: req.query.status,
+        normalizedStatus: filters.status,
+        filters: filters
+      });
     }
 
     const pagination = validatePagination(req.query.page, req.query.pageSize);
@@ -299,7 +301,7 @@ router.get('/', async (req, res, next) => {
         return res.json(cached);
       }
     } else {
-      console.log('[routes/properties] Skipping cache for removed status (to avoid stale empty results)');
+      logger.debug('Skipping cache for removed status', { requestId: req.id });
     }
 
     // Debug logging for lot filters
@@ -334,23 +336,24 @@ router.get('/', async (req, res, next) => {
 
     // Extra logging for removed status
     if (filters.status === 'removed') {
-      console.log('[routes/properties] ========== REMOVED STATUS RESPONSE ==========');
-      console.log('[routes/properties] Query result:', {
+      logger.debug('REMOVED STATUS RESPONSE', {
+        requestId: req.id,
         propertiesLength: result.properties?.length || 0,
         totalCount: result.totalCount,
-        pagination: result.pagination
+        pagination: result.pagination,
+        sampleProperties: result.properties?.slice(0, 2).map(p => ({
+          ListingKey: p?.ListingKey,
+          MlsStatus: p?.MlsStatus
+        })) || []
       });
-      console.log('[routes/properties] Sample properties before mapping:', result.properties?.slice(0, 2).map(p => ({
-        ListingKey: p?.ListingKey,
-        MlsStatus: p?.MlsStatus
-      })) || []);
     }
 
     // Map to PropertyCardResponse format
     const properties = result.properties.map(mapToPropertyCardResponse);
 
     if (filters.status === 'removed') {
-      console.log('[routes/properties] After mapping:', {
+      logger.debug('After mapping removed status properties', {
+        requestId: req.id,
         propertiesLength: properties.length,
         sampleProperties: properties.slice(0, 2).map(p => ({
           listingKey: p?.listingKey,
@@ -366,12 +369,12 @@ router.get('/', async (req, res, next) => {
     };
 
     if (filters.status === 'removed') {
-      console.log('[routes/properties] Final payload:', {
+      logger.debug('Final removed status payload', {
+        requestId: req.id,
         propertiesLength: payload.properties?.length || 0,
         totalCount: payload.totalCount,
         pagination: payload.pagination
       });
-      console.log('[routes/properties] ===========================================');
     }
 
     // Set cache (30s TTL)

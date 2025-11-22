@@ -8,6 +8,7 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { logger } from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -164,7 +165,10 @@ export async function geocodePropertyAsync(property, dbClient) {
       // Silently fail - don't break sync process
       // Only log if it's not a rate limit error (those are expected)
       if (!error.message?.includes('quota') && !error.message?.includes('OVER_QUERY_LIMIT')) {
-        console.error(`[Geocoding] Failed to geocode ${property.ListingKey || property.listingKey}:`, error.message);
+        logger.error('Failed to geocode property', {
+          listingKey: property.ListingKey || property.listingKey,
+          error: error.message
+        });
       }
     }
   }, 0);

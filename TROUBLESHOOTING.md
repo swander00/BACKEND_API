@@ -2,6 +2,28 @@
 
 ## Common Issues and Solutions
 
+### 0. Server Hanging / Not Responding
+
+If the backend server keeps loading and doesn't respond to requests:
+
+**Root Cause**: The server is likely hanging on database queries. The health endpoint (`/health`) queries the database, and if that query hangs or times out, all requests will hang.
+
+**Solution**:
+1. **Restart the Backend Server**
+   - Stop the current backend server process (Ctrl+C or kill process)
+   - Restart: `cd BACKEND_API && npm start`
+
+2. **Check Database Connection**
+   - Verify `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set correctly
+   - Test database connectivity with: `npm run test:smoke`
+
+3. **Check for Long-Running Queries**
+   - Review Railway logs for slow queries
+   - Check if materialized views need refreshing: `npm run refresh:mvs`
+
+4. **Verify Environment Variables**
+   - Ensure all required variables are loaded (see section 1 below)
+
 ### 1. Backend Not Starting
 
 #### Check Environment Variables
